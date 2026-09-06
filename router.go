@@ -52,6 +52,10 @@ type Router interface {
 	Url(name string, params map[string]string) string
 	// Fallback registers a fallback route.
 	Fallback(handler interface{})
+	// Redirect registers a redirect route to a destination.
+	Redirect(uri, destination string, status ...int)
+	// PermanentRedirect registers a 301 redirect route.
+	PermanentRedirect(uri, destination string)
 	// Where adds a regex constraint to a route parameter.
 	Where(name string, expression string) Router
 	// WhereNumber adds a numeric regex constraint to parameters.
@@ -531,6 +535,22 @@ func (r *router) Url(name string, params map[string]string) string {
 // Fallback registers a fallback route.
 func (r *router) Fallback(handler interface{}) {
 	r.fallback = handler
+}
+
+// Redirect registers a redirect route to a destination.
+func (r *router) Redirect(uri, destination string, status ...int) {
+	code := 302
+	if len(status) > 0 {
+		code = status[0]
+	}
+	r.Get(uri, func(req *Request) *Response {
+		return Redirect(destination, code)
+	})
+}
+
+// PermanentRedirect registers a 301 redirect route.
+func (r *router) PermanentRedirect(uri, destination string) {
+	r.Redirect(uri, destination, 301)
 }
 
 // Where adds a regex constraint to a route parameter.

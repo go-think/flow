@@ -266,6 +266,72 @@ func (u *UrlGenerator) TemporarySignedRoute(name string, expiration time.Duratio
 	return u.SignedRoute(name, params, expiration)
 }
 
+// SignedRouteAbsolute creates a signed URL over the absolute form
+// (scheme://host/path?query) of the named route. It requires a request
+// provider to determine scheme and host.
+func (u *UrlGenerator) SignedRouteAbsolute(name string, params map[string]string, expiration ...time.Duration) string {
+	urlPath, err := u.Route(name, params)
+	if err != nil {
+		return ""
+	}
+	keys := u.keys()
+	if len(keys) == 0 {
+		return ""
+	}
+	req := u.currentRequest()
+	if req == nil {
+		return ""
+	}
+	payload := u.absoluteURL(req, urlPath)
+	if len(expiration) > 0 {
+		expires := strconv.FormatInt(time.Now().Add(expiration[0]).Unix(), 10)
+		payload = addQueryParam(payload, "expires", expires)
+	}
+	return addQueryParam(payload, "signature", signHMAC(payload, keys[0]))
+}
+
+// HasValidSignatureAbsolute verifies a signature computed over the absolute
+// form of the request URL.
+func (u *UrlGenerator) HasValidSignatureAbsolute(req *Request) bool {
+	if req == nil || req.Request == nil || req.Request.URL == nil {
+		return false
+	}
+	sig, err := req.Query("signature")
+	if err != nil || sig == "" {
+		return false
+	}
+	expiresStr, _ := req.Query("expires")
+	if expiresStr != "" {
+		expires, err := strconv.ParseInt(expiresStr, 10, 64)
+		if err != nil || time.Now().Unix() > expires {
+			return false
+		}
+	}
+	keys := u.keys()
+	if len(keys) == 0 {
+		return false
+	}
+
+	pathQuery := signedPayloadFromRequest(req, nil)
+	target := u.absoluteURL(req, pathQuery)
+	for _, key := range keys {
+		if hmac.Equal([]byte(sig), []byte(signHMAC(target, key))) {
+			return true
+		}
+	}
+	return false
+}
+
+// absoluteURL joins scheme and host with a path (and its query, if present).
+func (u *UrlGenerator) absoluteURL(req *Request, pathWithQuery string) string {
+	scheme := "http"
+	if req.Request.TLS != nil || strings.EqualFold(req.Header("X-Forwarded-Proto"), "https") || req.Request.URL != nil && req.Request.URL.Scheme == "https" {
+		scheme = "https"
+	}
+	host := req.Request.Host
+	return scheme + "://" + host + pathWithQuery
+}
+
 // HasValidSignature checks whether the request carries a valid, unexpired
 // signature, accepting any of the currently configured keys (current +
 // previous). A URL without an expires parameter never expires.

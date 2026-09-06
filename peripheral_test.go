@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -119,4 +120,48 @@ func TestRedirector(t *testing.T) {
 	ug.SetKeyResolver(func() []string { return []string{"k"} })
 	res = rd.SignedRoute("target.route", nil)
 	assert.Contains(t, res.Header.Get("Location"), "signature=")
+}
+
+func TestRedirectRoutes(t *testing.T) {
+	r := New()
+	r.Redirect("/old", "/new", 302)
+	r.PermanentRedirect("/legacy", "/new")
+	r.Register()
+
+	rec := httptest.NewRecorder()
+	httpReq, _ := http.NewRequest("GET", "/old", nil)
+	req := NewRequest(httpReq)
+	req.SetResponseWriter(rec)
+	res := r.Dispatch(req).(*Response)
+	assert.Equal(t, 302, res.GetCode())
+	assert.Equal(t, "/new", res.Header.Get("Location"))
+
+	rec2 := httptest.NewRecorder()
+	httpReq2, _ := http.NewRequest("GET", "/legacy", nil)
+	req2 := NewRequest(httpReq2)
+	req2.SetResponseWriter(rec2)
+	res2 := r.Dispatch(req2).(*Response)
+	assert.Equal(t, 301, res2.GetCode())
+}
+
+func TestSignedRouteAbsolute(t *testing.T) {
+	r := New()
+	r.Get("/download/{file}", func(file string) string { return "x" }).Name("file.download")
+	r.Register()
+
+	httpReq, _ := http.NewRequest("GET", "https://example.com/start", nil)
+	ug := NewUrlGenerator(r).SetKeyResolver(func() []string { return []string{"key-a"} }).SetRequestProvider(func() *Request {
+		return NewRequest(httpReq)
+	})
+
+	signed := ug.SignedRouteAbsolute("file.download", map[string]string{"file": "a.pdf"}, time.Hour)
+	assert.Contains(t, signed, "https://example.com/download/a.pdf?")
+	assert.Contains(t, signed, "expires=")
+
+	verifyReq, _ := http.NewRequest("GET", signed, nil)
+	assert.True(t, ug.HasValidSignatureAbsolute(NewRequest(verifyReq)))
+
+	// Tampered signature rejected.
+	bad, _ := http.NewRequest("GET", signed+"x", nil)
+	assert.False(t, ug.HasValidSignatureAbsolute(NewRequest(bad)))
 }
