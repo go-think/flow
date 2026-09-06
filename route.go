@@ -154,11 +154,18 @@ func (r *Route) Middleware() []any {
 	return r.middlewares
 }
 
-// GatherMiddleware returns all middleware for the route, including any
-// declared by the controller (a no-op extension point for non-controller
-// actions).
+// GatherMiddleware returns all middleware for the route: the entries attached
+// at registration plus the middleware the controller declares for its method
+// (with only/except filters applied).
 func (r *Route) GatherMiddleware() []any {
-	return r.middlewares
+	out := append([]any(nil), r.middlewares...)
+	if action, ok := r.handler.(ControllerAction); ok {
+		dispatcher := r.router.getControllerDispatcher()
+		if controller, err := dispatcher.ResolveController(action); err == nil {
+			out = append(out, dispatcher.GetMiddleware(controller, action.Method)...)
+		}
+	}
+	return out
 }
 
 // Matches determines whether the route matches the given method and path.
@@ -269,6 +276,17 @@ func (r *Route) Run(request *Request, params ...[]*parameter) (result any) {
 			httpHandler.ServeHTTP(request.ResponseWriter(), request.Request)
 			return HandledResponse()
 		}
+	}
+
+	// Controller actions are dispatched through the ControllerDispatcher.
+	if action, ok := r.handler.(ControllerAction); ok {
+		result, err := r.router.getControllerDispatcher().Dispatch(r, request, action, parsedParams)
+		if err != nil {
+			// Controller resolution failures are programming errors; they are
+			// reported through the exception pipeline like any other panic.
+			panic(err)
+		}
+		return result
 	}
 
 	v := reflect.ValueOf(r.handler)

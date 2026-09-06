@@ -69,6 +69,11 @@ type Router interface {
 	Register()
 	// Dump returns a byte slice dump of all registered routes.
 	Dump() []byte
+	// RegisterController registers a controller instance under a name so
+	// string actions ("Name@Method") can reference it.
+	RegisterController(name string, controller any)
+	// SetControllerDispatcher replaces the controller dispatcher.
+	SetControllerDispatcher(dispatcher ControllerDispatcher)
 
 	// SignedUrl creates a signed URL for a named route.
 	SignedUrl(name string, expiration time.Duration, params map[string]string) string
@@ -128,6 +133,7 @@ type Router interface {
 type GroupAttributes struct {
 	Prefix     string
 	Name       string
+	Controller string // namespace prefix applied to string controller actions
 	Middleware []interface{}
 	Wheres     map[string]string
 }
@@ -158,35 +164,38 @@ func (f ParameterResolverFunc) ResolveParameter(paramType reflect.Type, request 
 type router struct {
 	inited bool
 
-	method           []string
-	prefix           string
-	pattern          string
-	handler          interface{}
-	middlewares      []interface{}
-	withoutMiddleware []interface{}
-	group            *router
-	name             string
-	wheres           map[string]string
-	groupWheres      map[string]string
-	patterns         map[string]string
-	signatureKey     string
-	middlewareAliases map[string]interface{}
-	middlewareGroups  map[string][]interface{}
+	method             []string
+	prefix             string
+	pattern            string
+	handler            interface{}
+	middlewares        []interface{}
+	withoutMiddleware  []interface{}
+	group              *router
+	controllerPrefix   string
+	name               string
+	wheres             map[string]string
+	groupWheres        map[string]string
+	patterns           map[string]string
+	signatureKey       string
+	middlewareAliases  map[string]interface{}
+	middlewareGroups   map[string][]interface{}
 	middlewarePriority []interface{}
-	parameterResolver ParameterResolver
+	parameterResolver  ParameterResolver
 
 	collects []*router
 
-	collection        *RouteCollection
-	fallback          interface{}
-	currentRoute      *Route
-	currentRequest    *Request
-	disableMiddleware bool
+	collection           *RouteCollection
+	fallback             interface{}
+	currentRoute         *Route
+	currentRequest       *Request
+	disableMiddleware    bool
+	controllers          map[string]any
+	controllerDispatcher ControllerDispatcher
 
-	onRouting            []func(request *Request)
-	onRouteMatched       []func(route *Route, request *Request)
-	onPreparingResponse  []func(request *Request, result any)
-	onResponsePrepared   []func(request *Request, response *Response)
+	onRouting           []func(request *Request)
+	onRouteMatched      []func(route *Route, request *Request)
+	onPreparingResponse []func(request *Request, result any)
+	onResponsePrepared  []func(request *Request, response *Response)
 }
 
 // New creates a new Router with optional configuration options.
@@ -197,6 +206,7 @@ func New(opts ...Option) Router {
 		wheres:            make(map[string]string),
 		middlewareAliases: make(map[string]interface{}),
 		middlewareGroups:  make(map[string][]interface{}),
+		controllers:       make(map[string]any),
 	}
 
 	for _, opt := range opts {
@@ -362,7 +372,7 @@ func (r *router) Add(method []string, pattern string, handler interface{}) Route
 	route := r.initRoute()
 	route.method = method
 	route.pattern = pattern
-	route.handler = handler
+	route.handler = parseControllerAction(handler)
 	return route
 }
 
@@ -438,6 +448,7 @@ func (r *router) Prefix(prefix string) Router {
 func (r *router) Group(attrs GroupAttributes, callback func(group Router)) {
 	node := r.cloneRoute()
 	node.prefix = attrs.Prefix
+	node.controllerPrefix = attrs.Controller
 	node.name = node.name + attrs.Name
 	for k, v := range attrs.Wheres {
 		if node.groupWheres == nil {
@@ -625,11 +636,18 @@ func (r *router) register(root *router) {
 			combinedWheres[k] = v
 		}
 
+		actionHandler := node.handler
+		if action, ok := actionHandler.(ControllerAction); ok {
+			if name, isName := action.Controller.(string); isName && node.controllerPrefix != "" {
+				action.Controller = node.controllerPrefix + "." + name
+				actionHandler = action
+			}
+		}
 		entity := &Route{
 			methods:           node.method,
 			uri:               routePattern,
 			name:              node.name,
-			handler:           node.handler,
+			handler:           actionHandler,
 			middlewares:       node.middlewares,
 			withoutMiddleware: node.withoutMiddleware,
 			wheres:            combinedWheres,
@@ -647,13 +665,14 @@ func (r *router) initRoute() *router {
 	route := r
 	if !r.inited {
 		route = &router{
-			inited:            true,
-			name:              r.name,
-			group:             r,
-			parameterResolver: r.parameterResolver,
-			signatureKey:      r.signatureKey,
-			middlewareAliases: r.middlewareAliases,
-			middlewareGroups:  r.middlewareGroups,
+			inited:             true,
+			name:               r.name,
+			controllerPrefix:   r.controllerPrefix,
+			group:              r,
+			parameterResolver:  r.parameterResolver,
+			signatureKey:       r.signatureKey,
+			middlewareAliases:  r.middlewareAliases,
+			middlewareGroups:   r.middlewareGroups,
 			middlewarePriority: r.middlewarePriority,
 		}
 		if r.collection != nil {
@@ -667,13 +686,14 @@ func (r *router) initRoute() *router {
 // cloneRoute creates a group node attached to this node.
 func (r *router) cloneRoute() *router {
 	route := &router{
-		inited:            false,
-		name:              r.name,
-		group:             r,
-		parameterResolver: r.parameterResolver,
-		signatureKey:      r.signatureKey,
-		middlewareAliases: r.middlewareAliases,
-		middlewareGroups:  r.middlewareGroups,
+		inited:             false,
+		name:               r.name,
+		controllerPrefix:   r.controllerPrefix,
+		group:              r,
+		parameterResolver:  r.parameterResolver,
+		signatureKey:       r.signatureKey,
+		middlewareAliases:  r.middlewareAliases,
+		middlewareGroups:   r.middlewareGroups,
 		middlewarePriority: r.middlewarePriority,
 	}
 	if r.collection != nil {
@@ -940,6 +960,38 @@ func (r *router) DisableMiddleware(disable bool) {
 	r.disableMiddleware = disable
 }
 
+// RegisterController registers a controller instance under a name. The
+// registry lives on the root router, like the named-route index.
+func (r *router) RegisterController(name string, controller any) {
+	root := r.root()
+	if root.controllers == nil {
+		root.controllers = make(map[string]any)
+	}
+	root.controllers[name] = controller
+}
+
+// root walks up the group chain to the owning router.
+func (r *router) root() *router {
+	node := r
+	for node != nil && node.group != nil {
+		node = node.group
+	}
+	return node
+}
+
+// SetControllerDispatcher replaces the controller dispatcher.
+func (r *router) SetControllerDispatcher(dispatcher ControllerDispatcher) {
+	r.controllerDispatcher = dispatcher
+}
+
+// getControllerDispatcher returns the configured dispatcher or the default one.
+func (r *router) getControllerDispatcher() ControllerDispatcher {
+	if r.controllerDispatcher != nil {
+		return r.controllerDispatcher
+	}
+	return &controllerDispatcher{router: r}
+}
+
 // prepareResponse converts the action result into a response, firing the
 // pre/post response events.
 func (r *router) prepareResponse(request *Request, result any) *Response {
@@ -1041,6 +1093,15 @@ func resolveMiddleware(m interface{}, r *router) []Middleware {
 					nextVal = nextVal.Convert(targetType)
 				}
 				res := method.Call([]reflect.Value{reflect.ValueOf(req), nextVal})
+				if len(res) > 0 {
+					return res[0].Interface()
+				}
+				return nil
+			})
+		} else if val.Kind() == reflect.Func && val.Type().NumIn() == 2 && val.Type().NumOut() >= 1 {
+			// A raw closure with the middleware signature.
+			resolved = append(resolved, func(req *Request, next Closure) interface{} {
+				res := val.Call([]reflect.Value{reflect.ValueOf(req), reflect.ValueOf(next)})
 				if len(res) > 0 {
 					return res[0].Interface()
 				}
