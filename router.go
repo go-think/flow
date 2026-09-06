@@ -196,6 +196,8 @@ type router struct {
 	name               string
 	wheres             map[string]string
 	groupWheres        map[string]string
+	groupMetadata      map[string]any
+	domain             string
 	patterns           map[string]string
 	signatureKey       string
 	middlewareAliases  map[string]interface{}
@@ -696,6 +698,8 @@ func (r *router) register(root *router) {
 			middlewares:       node.middlewares,
 			withoutMiddleware: node.withoutMiddleware,
 			wheres:            combinedWheres,
+			metadata:          node.groupMetadata,
+			domain:            node.domain,
 			router:            root,
 		}
 

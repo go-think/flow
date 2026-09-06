@@ -45,6 +45,10 @@ type Route struct {
 	defaults          map[string]any
 	metadata          map[string]any
 	fallback          bool
+	secure            bool
+	domain            string
+	scopedBindings    bool
+	withTrashed       bool
 
 	router *router // back reference for resolver/registry lookups
 
@@ -137,6 +141,50 @@ func (r *Route) SetMetadata(key string, value any) *Route {
 // IsFallback reports whether this route is the router fallback.
 func (r *Route) IsFallback() bool {
 	return r.fallback
+}
+
+// Secure marks the route as requiring an HTTPS request.
+func (r *Route) Secure() *Route {
+	r.secure = true
+	return r
+}
+
+// IsSecure reports whether the route requires HTTPS.
+func (r *Route) IsSecure() bool {
+	return r.secure
+}
+
+// SetDomain restricts the route to a request host (e.g. "api.example.com").
+func (r *Route) SetDomain(domain string) *Route {
+	r.domain = domain
+	return r
+}
+
+// GetDomain returns the route host restriction, or "" when unrestricted.
+func (r *Route) GetDomain() string {
+	return r.domain
+}
+
+// ScopeBindings marks nested resource parameters as bound in a scoped chain.
+func (r *Route) ScopeBindings() *Route {
+	r.scopedBindings = true
+	return r
+}
+
+// EnforcesScopedBindings reports whether scoped binding is enforced.
+func (r *Route) EnforcesScopedBindings() bool {
+	return r.scopedBindings
+}
+
+// WithTrashed marks the route as allowing soft-deleted entities in bindings.
+func (r *Route) WithTrashed() *Route {
+	r.withTrashed = true
+	return r
+}
+
+// AllowsTrashedBindings reports whether trashed entities may be bound.
+func (r *Route) AllowsTrashedBindings() bool {
+	return r.withTrashed
 }
 
 // WithoutMiddleware excludes middlewares (matched by value equality on the

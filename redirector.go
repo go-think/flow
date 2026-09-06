@@ -90,6 +90,16 @@ func (r *Redirector) TemporarySignedRoute(name string, expiration any, params ma
 	return r.To(r.generator.SignedRoute(name, params), status...)
 }
 
+// Guest stores the current URL as the intended destination and redirects to
+// the given path (typically a login page).
+func (r *Redirector) Guest(path string, status ...int) *Response {
+	req := r.currentRequest()
+	if req != nil && req.Path() != path {
+		r.SetIntendedUrl(req.Path())
+	}
+	return r.To(path, status...)
+}
+
 // Intended redirects to the URL the user was heading to before being
 // intercepted, or to the default.
 func (r *Redirector) Intended(defaultPath string, status ...int) *Response {

@@ -93,7 +93,7 @@ func (c *RouteCollection) Match(request *Request) (*Route, []*parameter, error) 
 		if handle, ps, _ := tree.getValue(path); handle != nil {
 			if route, ok := handle.(*Route); ok {
 				params := paramsFromTree(ps)
-				if route.ValidateParams(params) {
+				if route.ValidateParams(params) && routeMatchesScheme(route, request) && routeMatchesDomain(route, request) {
 					return route, params, nil
 				}
 			}
@@ -189,6 +189,41 @@ func (r *Route) matchRegex(path string) ([]*parameter, bool) {
 		return parameters, true
 	}
 	return nil, false
+}
+
+// routeMatchesScheme checks the HTTPS requirement of a route against the
+// request (TLS connection or X-Forwarded-Proto header).
+func routeMatchesScheme(route *Route, request *Request) bool {
+	if !route.IsSecure() {
+		return true
+	}
+	httpReq := request.GetHttpRequest()
+	if httpReq == nil {
+		return true
+	}
+	if httpReq.TLS != nil {
+		return true
+	}
+	proto := httpReq.Header.Get("X-Forwarded-Proto")
+	return strings.EqualFold(proto, "https")
+}
+
+// routeMatchesDomain checks the host restriction of a route against the
+// request host.
+func routeMatchesDomain(route *Route, request *Request) bool {
+	domain := route.GetDomain()
+	if domain == "" {
+		return true
+	}
+	httpReq := request.GetHttpRequest()
+	if httpReq == nil {
+		return true
+	}
+	host := httpReq.Host
+	if idx := strings.Index(host, ":"); idx != -1 {
+		host = host[:idx]
+	}
+	return strings.EqualFold(host, domain)
 }
 
 func paramsFromTree(ps Params) []*parameter {
