@@ -5,11 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// remainingParamRegex detects unresolved placeholders in a generated URL.
+var remainingParamRegex = regexp.MustCompile(`\{[^}]+\}`)
 
 // NamedRouteSource provides read access to a router's named routes for URL
 // generation. The built-in Router implements it; custom routers can too by
@@ -30,6 +34,7 @@ type UrlGenerator struct {
 	routes                    NamedRouteSource
 	keyResolver               func() []string
 	missingNamedRouteResolver func(name string, params map[string]string) string
+	requestProvider           func() *Request
 }
 
 // NewUrlGenerator creates a UrlGenerator bound to the given named-route
@@ -88,7 +93,7 @@ func (u *UrlGenerator) Route(name string, params map[string]string) (string, err
 		return "", &RouteNotFoundError{RouteName: name}
 	}
 	if pattern, ok := u.routes.NamedRoutePattern(name); ok {
-		return u.toRoute(pattern, params), nil
+		return u.toRoute(name, pattern, params)
 	}
 	if u.missingNamedRouteResolver != nil {
 		if url := u.missingNamedRouteResolver(name, params); url != "" {
@@ -98,8 +103,9 @@ func (u *UrlGenerator) Route(name string, params map[string]string) (string, err
 	return "", &RouteNotFoundError{RouteName: name}
 }
 
-// toRoute interpolates parameters into a resolved route pattern.
-func (u *UrlGenerator) toRoute(pattern string, params map[string]string) string {
+// toRoute interpolates parameters into a resolved route pattern. A
+// UrlGenerationError is returned when required parameters are missing.
+func (u *UrlGenerator) toRoute(name string, pattern string, params map[string]string) (string, error) {
 	path := pattern
 	query := url.Values{}
 	for k, v := range params {
@@ -122,7 +128,10 @@ func (u *UrlGenerator) toRoute(pattern string, params map[string]string) string 
 	if len(query) > 0 {
 		path = path + "?" + query.Encode()
 	}
-	return path
+	if remainingParamRegex.MatchString(path) {
+		return "", &UrlGenerationError{RouteName: name, Missing: remainingParamRegex.FindAllString(path, -1)}
+	}
+	return path, nil
 }
 
 // SetMissingNamedRouteResolver registers a fallback consulted when a named
@@ -131,6 +140,58 @@ func (u *UrlGenerator) toRoute(pattern string, params map[string]string) string 
 func (u *UrlGenerator) SetMissingNamedRouteResolver(fn func(name string, params map[string]string) string) *UrlGenerator {
 	u.missingNamedRouteResolver = fn
 	return u
+}
+
+// SetRequestProvider registers the accessor for the request being handled. It
+// powers the request-dependent helpers (Current, Previous) and is wired by the
+// framework to the router's current request.
+func (u *UrlGenerator) SetRequestProvider(fn func() *Request) *UrlGenerator {
+	u.requestProvider = fn
+	return u
+}
+
+// currentRequest returns the request from the provider, if configured.
+func (u *UrlGenerator) currentRequest() *Request {
+	if u.requestProvider == nil {
+		return nil
+	}
+	return u.requestProvider()
+}
+
+// To resolves a path into a normalized, router-relative URL (leading slash).
+func (u *UrlGenerator) To(path string) string {
+	if strings.HasPrefix(path, "/") {
+		return path
+	}
+	return "/" + path
+}
+
+// Current returns the path of the request being handled, without the query
+// string. Returns "" when no request provider is configured or no request is
+// being handled.
+func (u *UrlGenerator) Current() string {
+	req := u.currentRequest()
+	if req == nil {
+		return ""
+	}
+	return req.Path()
+}
+
+// Previous returns the previous URL recorded in the session, falling back to
+// the given fallback (or "/") when unavailable.
+func (u *UrlGenerator) Previous(fallback string) string {
+	req := u.currentRequest()
+	if req != nil {
+		if session := req.Session(); session != nil {
+			if prev := session.PreviousUrl(); prev != "" {
+				return prev
+			}
+		}
+	}
+	if fallback == "" {
+		return "/"
+	}
+	return fallback
 }
 
 // escapeRouteParam encodes a parameter value for safe interpolation into the

@@ -2,6 +2,7 @@ package flow
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -63,6 +64,13 @@ type Router interface {
 	Has(name string) bool
 	// Bind registers an explicit binder for a route parameter name.
 	Bind(key string, binder Binder)
+	// Resource registers a resource controller with the conventional seven
+	// actions; the returned builder defers registration for customization.
+	Resource(name, controller string) *PendingResourceRegistration
+	// APIResource registers a resource without Create/Edit actions.
+	APIResource(name, controller string) *PendingResourceRegistration
+	// Singleton registers a singleton resource (no id parameter).
+	Singleton(name, controller string) *PendingResourceRegistration
 	// CurrentRouteName returns the current route name for the request.
 	CurrentRouteName(req *Request) string
 	// Is determines if the current route's name matches given patterns.
@@ -124,6 +132,13 @@ type Router interface {
 	OnResponsePrepared(callback func(request *Request, response *Response))
 	// DisableMiddleware disables (or re-enables) all route middleware.
 	DisableMiddleware(disable bool)
+	// Compile serializes routes with string-serializable actions
+	// (ControllerAction) for caching. Routes registered with closures cannot
+	// be cached and make Compile return an error.
+	Compile() ([]byte, error)
+	// RestoreCompiled replaces the route collection with routes deserialized
+	// from a previous Compile.
+	RestoreCompiled(data []byte) error
 }
 
 // --- End router.go ---
@@ -184,6 +199,8 @@ type router struct {
 	middlewarePriority []interface{}
 	parameterResolver  ParameterResolver
 	binders            map[string]Binder
+	pending            []*PendingResourceRegistration
+	registered         bool
 
 	collects []*router
 
@@ -571,8 +588,13 @@ func regexpQuote(s string) string {
 }
 
 // Register expands the collected pending routes into Route entities inside
-// the route collection.
+// the route collection, after flushing any deferred resource registrations.
 func (r *router) Register() {
+	r.registered = true
+	for _, p := range r.pending {
+		p.register()
+	}
+	r.pending = nil
 	r.register(r)
 }
 
@@ -973,6 +995,31 @@ func (r *router) RegisterController(name string, controller any) {
 	root.controllers[name] = controller
 }
 
+// Resource registers a resource controller with the conventional seven
+// actions; the returned builder defers registration for customization.
+func (r *router) Resource(name, controller string) *PendingResourceRegistration {
+	p := &PendingResourceRegistration{router: r, name: name, controller: controller}
+	r.root().pending = append(r.root().pending, p)
+	if r.root().registered {
+		p.register()
+	}
+	return p
+}
+
+// APIResource registers a resource without Create/Edit actions.
+func (r *router) APIResource(name, controller string) *PendingResourceRegistration {
+	p := r.Resource(name, controller)
+	p.options.Except = []string{"Create", "Edit"}
+	return p
+}
+
+// Singleton registers a singleton resource (no id parameter).
+func (r *router) Singleton(name, controller string) *PendingResourceRegistration {
+	p := r.Resource(name, controller)
+	p.singleton = true
+	return p
+}
+
 // root walks up the group chain to the owning router.
 func (r *router) root() *router {
 	node := r
@@ -985,6 +1032,64 @@ func (r *router) root() *router {
 // SetControllerDispatcher replaces the controller dispatcher.
 func (r *router) SetControllerDispatcher(dispatcher ControllerDispatcher) {
 	r.controllerDispatcher = dispatcher
+}
+
+// compiledRouteData is the JSON-serializable form of a cacheable route.
+type compiledRouteData struct {
+	Methods []string `json:"methods"`
+	URI     string   `json:"uri"`
+	Name    string   `json:"name,omitempty"`
+	Action  string   `json:"action"`
+}
+
+// Compile serializes routes whose actions are controller actions; closures
+// cannot cross a cache boundary and make Compile return an error.
+func (r *router) Compile() ([]byte, error) {
+	var out []compiledRouteData
+	for _, route := range r.collection.All() {
+		action, ok := route.Handler().(ControllerAction)
+		if !ok {
+			return nil, fmt.Errorf("flow: route [%s] has a non-serializable action and cannot be cached", route.URI())
+		}
+		name, ok := action.Controller.(string)
+		if !ok {
+			return nil, fmt.Errorf("flow: route [%s] has a non-serializable action and cannot be cached", route.URI())
+		}
+		out = append(out, compiledRouteData{
+			Methods: route.Methods(),
+			URI:     route.URI(),
+			Name:    route.GetName(),
+			Action:  name + "@" + action.Method,
+		})
+	}
+	return json.Marshal(out)
+}
+
+// RestoreCompiled replaces the route collection with routes deserialized from
+// a previous Compile. Controllers must be registered before restoring.
+func (r *router) RestoreCompiled(data []byte) error {
+	var out []compiledRouteData
+	if err := json.Unmarshal(data, &out); err != nil {
+		return err
+	}
+
+	r.collection = NewRouteCollection()
+	r.currentRoute = nil
+
+	for _, cr := range out {
+		if _, ok := r.controllers[cr.Action[:strings.Index(cr.Action, "@")]]; !ok {
+			return fmt.Errorf("flow: controller [%s] is not registered", cr.Action[:strings.Index(cr.Action, "@")])
+		}
+		entity := &Route{
+			methods: cr.Methods,
+			uri:     cr.URI,
+			name:    cr.Name,
+			handler: parseControllerAction(cr.Action),
+			router:  r,
+		}
+		r.collection.Add(entity)
+	}
+	return nil
 }
 
 // getControllerDispatcher returns the configured dispatcher or the default one.

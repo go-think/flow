@@ -50,6 +50,31 @@ func min(a, b int) int {
 	return b
 }
 
+// clone returns a deep copy of the subtree rooted at n; stored handles are
+// shared. Used by the route collection to try insertions atomically: the
+// clone is mutated first and swapped in only on success.
+func (n *node) clone() *node {
+	if n == nil {
+		return nil
+	}
+	clone := &node{
+		path:      n.path,
+		indices:   n.indices,
+		wildChild: n.wildChild,
+		nType:     n.nType,
+		priority:  n.priority,
+		handle:    n.handle,
+		paramName: n.paramName,
+	}
+	if len(n.children) > 0 {
+		clone.children = make([]*node, len(n.children))
+		for i, c := range n.children {
+			clone.children[i] = c.clone()
+		}
+	}
+	return clone
+}
+
 func countParams(path string) uint16 {
 	var n uint16
 	for i := 0; i < len(path); i++ {

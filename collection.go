@@ -38,7 +38,10 @@ func NewRouteCollection() *RouteCollection {
 }
 
 // Add indexes a route into the collection. Routes with optional parameters
-// are expanded into one matchable variant per combination before indexing.
+// are expanded into one matchable variant per combination. Each variant is
+// added to the per-verb radix tree; when a variant conflicts with the tree's
+// static/wildcard layout it falls back to regex-only matching, so resource
+// routes like "/photos/create" and "/photos/{photo}" coexist.
 func (c *RouteCollection) Add(route *Route) {
 	c.routes = append(c.routes, route)
 
@@ -53,14 +56,28 @@ func (c *RouteCollection) Add(route *Route) {
 
 	for _, variant := range route.expanded {
 		for _, method := range route.methods {
-			rootNode, ok := c.tries[method]
-			if !ok {
-				rootNode = &node{}
-				c.tries[method] = rootNode
-			}
-			rootNode.addRoute(variant.pattern, route)
-
 			c.regexes[method] = append(c.regexes[method], route)
+
+			if existing, ok := c.tries[method]; ok {
+				clone := existing.clone()
+				inserted := func() (ok bool) {
+					defer func() {
+						if recover() != nil {
+							ok = false
+						}
+					}()
+					clone.addRoute(variant.pattern, route)
+					return true
+				}()
+				if inserted {
+					c.tries[method] = clone
+				}
+				continue
+			}
+
+			rootNode := &node{}
+			rootNode.addRoute(variant.pattern, route)
+			c.tries[method] = rootNode
 		}
 	}
 }
