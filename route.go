@@ -1,0 +1,471 @@
+package flow
+
+import (
+	"net/http"
+	"reflect"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+)
+
+// matchMethod reports whether a request verb matches a target verb.
+func matchMethod(method, target string) bool {
+	if target == "*" {
+		return true
+	}
+	return target == method
+}
+
+// matchMethods reports whether a request verb matches any of the targets.
+func matchMethods(method string, target []string) bool {
+	for _, v := range target {
+		if matchMethod(method, v) {
+			return true
+		}
+	}
+	return false
+}
+
+// optionalParamRegex strips unprovided optional parameters, e.g. /{param?}.
+var optionalParamRegex = regexp.MustCompile(`(/)?\{[a-zA-Z0-9_]+\?\}`)
+
+// Route is a single registered route: its verb list, URI pattern, constraints,
+// defaults, middleware and action, plus the compiled matching artifacts.
+type Route struct {
+	methods           []string
+	uri               string
+	name              string
+	handler           any
+	middlewares       []any
+	withoutMiddleware []any
+	wheres            map[string]string
+	defaults          map[string]any
+	metadata          map[string]any
+	fallback          bool
+
+	router *router // back reference for resolver/registry lookups
+
+	expanded    []*compiledPattern
+	compileOnce sync.Once
+}
+
+// compiledPattern is one matchable variant of the route URI. Routes with
+// optional parameters ("{name?}") expand into several variants.
+type compiledPattern struct {
+	pattern        string
+	regex          *regexp.Regexp
+	parameterNames []string
+}
+
+// Methods returns the HTTP verbs this route responds to.
+func (r *Route) Methods() []string {
+	return r.methods
+}
+
+// URI returns the raw path pattern of the route (e.g. "/users/{id}").
+func (r *Route) URI() string {
+	return r.uri
+}
+
+// Name returns the route name.
+func (r *Route) GetName() string {
+	return r.name
+}
+
+// SetName sets the route name.
+func (r *Route) SetName(name string) *Route {
+	r.name = name
+	return r
+}
+
+// Handler returns the route action.
+func (r *Route) Handler() any {
+	return r.handler
+}
+
+// Wheres returns the parameter constraints of the route.
+func (r *Route) Wheres() map[string]string {
+	return r.wheres
+}
+
+// SetWhere adds a regex constraint for a route parameter.
+func (r *Route) SetWhere(name, expression string) *Route {
+	if r.wheres == nil {
+		r.wheres = make(map[string]string)
+	}
+	r.wheres[name] = expression
+	return r
+}
+
+// Defaults returns the route parameter defaults.
+func (r *Route) Defaults() map[string]any {
+	return r.defaults
+}
+
+// SetDefault sets a default value for a route parameter.
+func (r *Route) SetDefault(key string, value any) *Route {
+	if r.defaults == nil {
+		r.defaults = make(map[string]any)
+	}
+	r.defaults[key] = value
+	return r
+}
+
+// Metadata returns route metadata, or the default when the key is absent.
+func (r *Route) Metadata(key string, defaultValue ...any) any {
+	if v, ok := r.metadata[key]; ok {
+		return v
+	}
+	if len(defaultValue) > 0 {
+		return defaultValue[0]
+	}
+	return nil
+}
+
+// SetMetadata stores route metadata.
+func (r *Route) SetMetadata(key string, value any) *Route {
+	if r.metadata == nil {
+		r.metadata = make(map[string]any)
+	}
+	r.metadata[key] = value
+	return r
+}
+
+// IsFallback reports whether this route is the router fallback.
+func (r *Route) IsFallback() bool {
+	return r.fallback
+}
+
+// WithoutMiddleware excludes middlewares (matched by value equality on the
+// raw registration entry) from this route.
+func (r *Route) WithoutMiddleware(middlewares ...any) *Route {
+	r.withoutMiddleware = append(r.withoutMiddleware, middlewares...)
+	return r
+}
+
+// ExcludedMiddleware returns the excluded raw middleware entries.
+func (r *Route) ExcludedMiddleware() []any {
+	return r.withoutMiddleware
+}
+
+// Middleware returns the raw middleware entries attached to the route.
+func (r *Route) Middleware() []any {
+	return r.middlewares
+}
+
+// GatherMiddleware returns all middleware for the route, including any
+// declared by the controller (a no-op extension point for non-controller
+// actions).
+func (r *Route) GatherMiddleware() []any {
+	return r.middlewares
+}
+
+// Matches determines whether the route matches the given method and path.
+func (r *Route) Matches(method, path string) bool {
+	r.compile()
+	if !matchMethods(method, r.methods) {
+		return false
+	}
+	for _, variant := range r.expanded {
+		if variant.regex != nil && variant.regex.MatchString(path) {
+			return true
+		}
+	}
+	return false
+}
+
+// Bind extracts the route parameters for a request and stores them on it.
+// Parameters extracted by the matcher (treeParams) take precedence; the rest
+// are recovered from the compiled patterns. Every declared parameter —
+// including optional ones — is guaranteed to be present.
+func (r *Route) Bind(req *Request, path string, treeParams ...[]*parameter) []*parameter {
+	r.compile()
+
+	path = "/" + strings.TrimLeft(path, "/")
+	parameters := make([]*parameter, 0)
+
+	if len(treeParams) > 0 && len(treeParams[0]) > 0 {
+		for _, p := range treeParams[0] {
+			parameters = append(parameters, p)
+			if req != nil {
+				req.SetRouteParam(p.name, p.value)
+			}
+		}
+	} else {
+		for _, variant := range r.expanded {
+			if variant.regex == nil {
+				continue
+			}
+			rawMatches := variant.regex.FindStringSubmatch(path)
+			if len(rawMatches) <= 1 {
+				continue
+			}
+			matches := rawMatches[1:]
+			for k, name := range variant.parameterNames {
+				val := ""
+				if k < len(matches) {
+					val = matches[k]
+				}
+				p := &parameter{name: name, value: val}
+				parameters = append(parameters, p)
+				if req != nil {
+					req.SetRouteParam(name, val)
+				}
+			}
+			break
+		}
+	}
+
+	for _, variant := range r.expanded {
+		for _, name := range variant.parameterNames {
+			found := false
+			for _, p := range parameters {
+				if p.name == name {
+					found = true
+					break
+				}
+			}
+			if !found {
+				p := &parameter{name: name, value: ""}
+				parameters = append(parameters, p)
+				if req != nil {
+					req.SetRouteParam(name, "")
+				}
+			}
+		}
+	}
+
+	return parameters
+}
+
+// Run executes the route action and returns its raw result. When no explicit
+// parameters are passed, they are recovered from the request by the parameter
+// names declared in the pattern.
+func (r *Route) Run(request *Request, params ...[]*parameter) (result any) {
+	if r == nil || r.handler == nil {
+		return nil
+	}
+
+	var parsedParams []*parameter
+	if len(params) > 0 {
+		parsedParams = params[0]
+	} else if request != nil {
+		r.compile()
+		for _, variant := range r.expanded {
+			for _, name := range variant.parameterNames {
+				parsedParams = append(parsedParams, &parameter{
+					name:  name,
+					value: request.GetRouteParam(name),
+				})
+			}
+			break // all variants declare the same parameter set
+		}
+	}
+
+	// Direct execution for http.Handler (e.g. static files via http.FileServer).
+	if httpHandler, ok := r.handler.(http.Handler); ok {
+		if request != nil && request.ResponseWriter() != nil && request.Request != nil {
+			httpHandler.ServeHTTP(request.ResponseWriter(), request.Request)
+			return HandledResponse()
+		}
+	}
+
+	v := reflect.ValueOf(r.handler)
+	switch v.Type().Kind() {
+	case reflect.Func:
+		in := r.parseParams(v, request, parsedParams)
+		out := v.Call(in)
+		if len(out) > 0 {
+			result = out[0].Interface()
+		}
+	default:
+		result = r.handler
+	}
+
+	return result
+}
+
+// ValidateParams checks whether the given parameters satisfy the where
+// constraints of the route.
+func (r *Route) ValidateParams(params []*parameter) bool {
+	if len(r.wheres) == 0 {
+		return true
+	}
+	for _, p := range params {
+		if constraint, ok := r.wheres[p.name]; ok {
+			reg, err := regexp.Compile("^" + constraint + "$")
+			if err == nil && !reg.MatchString(p.value) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// ParameterNames returns all parameter names declared in the route pattern.
+func (r *Route) ParameterNames() []string {
+	r.compile()
+	var names []string
+	for _, variant := range r.expanded {
+		names = variant.parameterNames
+		break // all variants declare the same parameter set
+	}
+	return names
+}
+
+// compile expands the URI into its matchable variants and builds their regexes.
+func (r *Route) compile() {
+	r.compileOnce.Do(func() {
+		for _, pattern := range expandOptionalPatterns(r.uri) {
+			variant := &compiledPattern{pattern: pattern}
+			variant.parameterNames = compileParameterNames(pattern)
+
+			pat := strings.ReplaceAll(pattern, "/*", "/.*")
+			reg := regexp.MustCompile(`\{(\w+)\??\}`)
+			regexStr := reg.ReplaceAllStringFunc(pat, func(m string) string {
+				paramName := strings.TrimSuffix(strings.Trim(m, "{}"), "?")
+				if r.wheres != nil {
+					if constraint, ok := r.wheres[paramName]; ok {
+						return "(" + constraint + ")"
+					}
+				}
+				return "([^/]+)"
+			})
+			variant.regex = regexp.MustCompile("^" + regexStr + "$")
+
+			r.expanded = append(r.expanded, variant)
+		}
+	})
+}
+
+func (r *Route) getParameterResolver() ParameterResolver {
+	if r.router != nil {
+		return r.router.getParameterResolver()
+	}
+	return nil
+}
+
+// parseParams builds the argument list for the action: *Request first, then
+// container-provided dependencies (ParameterResolver), then route parameters
+// in order of appearance.
+func (r *Route) parseParams(value reflect.Value, request *Request, parameters []*parameter) []reflect.Value {
+	valueType := value.Type()
+	needNum := valueType.NumIn()
+	if needNum < 1 {
+		return nil
+	}
+
+	in := make([]reflect.Value, 0, needNum)
+	paramIdx := 0
+	resolver := r.getParameterResolver()
+
+	for i := 0; i < needNum; i++ {
+		t := valueType.In(i)
+
+		var reqType reflect.Type
+		if request != nil {
+			reqType = reflect.TypeOf(request)
+		}
+
+		if reqType != nil && t == reqType {
+			in = append(in, reflect.ValueOf(request))
+			continue
+		} else if reqType != nil && t == reqType.Elem() {
+			in = append(in, reflect.ValueOf(request).Elem())
+			continue
+		}
+
+		if resolver != nil {
+			if val, ok := resolver.ResolveParameter(t, request); ok {
+				in = append(in, val)
+				continue
+			}
+		}
+
+		if paramIdx < len(parameters) {
+			strVal := parameters[paramIdx].value
+			paramIdx++
+			in = append(in, convertParamValue(strVal, t))
+			continue
+		}
+
+		in = append(in, reflect.Zero(t))
+	}
+
+	return in
+}
+
+// compileParameterNames extracts the parameter names of a pattern.
+func compileParameterNames(pattern string) []string {
+	reg := regexp.MustCompile(`\{(.*?)\}`)
+	matches := reg.FindAllStringSubmatch(pattern, -1)
+
+	var result []string
+	for _, v := range matches {
+		name := strings.TrimSuffix(v[1], "?")
+		result = append(result, name)
+	}
+
+	return result
+}
+
+// expandOptionalPatterns enumerates the matchable variants of a pattern that
+// contains optional parameters ("{name?}").
+func expandOptionalPatterns(pattern string) []string {
+	if !strings.Contains(pattern, "?}") {
+		return []string{pattern}
+	}
+
+	var results []string
+	curr := pattern
+
+	for {
+		standardPat := regexp.MustCompile(`\{(\w+)\?\}`).ReplaceAllString(curr, "{$1}")
+		results = append(results, standardPat)
+
+		reLastOptional := regexp.MustCompile(`/[^/]*\{(\w+)\?\}[^/]*$`)
+		loc := reLastOptional.FindStringIndex(curr)
+		if loc == nil {
+			break
+		}
+
+		curr = curr[:loc[0]]
+		if curr == "" {
+			curr = "/"
+		}
+		if curr == "/" {
+			results = append(results, "/")
+			break
+		}
+	}
+
+	return results
+}
+
+func convertParamValue(str string, targetType reflect.Type) reflect.Value {
+	kind := targetType.Kind()
+	if kind == reflect.Ptr {
+		elemVal := convertParamValue(str, targetType.Elem())
+		ptr := reflect.New(targetType.Elem())
+		ptr.Elem().Set(elemVal)
+		return ptr
+	}
+
+	switch kind {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		intVal, _ := strconv.ParseInt(str, 10, 64)
+		return reflect.ValueOf(intVal).Convert(targetType)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		uintVal, _ := strconv.ParseUint(str, 10, 64)
+		return reflect.ValueOf(uintVal).Convert(targetType)
+	case reflect.Bool:
+		boolVal, _ := strconv.ParseBool(str)
+		return reflect.ValueOf(boolVal)
+	case reflect.Float32, reflect.Float64:
+		floatVal, _ := strconv.ParseFloat(str, 64)
+		return reflect.ValueOf(floatVal).Convert(targetType)
+	default:
+		return reflect.ValueOf(str).Convert(targetType)
+	}
+}

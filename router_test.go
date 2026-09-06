@@ -34,11 +34,11 @@ func TestConcurrentRouteMatchingParamIsolation(t *testing.T) {
 			assert.NoError(t, err)
 
 			req := NewRequest(httpReq)
-			rule, params, err := r.MatchRequest(req)
+			route, err := r.MatchRequest(req)
 			assert.NoError(t, err)
-			assert.NotNil(t, rule)
+			assert.NotNil(t, route)
 
-			res := rule.Run(req, params)
+			res := route.Run(req)
 			assert.Equal(t, "user:"+idStr, res)
 		}(userID)
 	}
@@ -55,9 +55,9 @@ func TestRoutePrefixAndGroup(t *testing.T) {
 
 	httpReq, _ := http.NewRequest("GET", "/ping", nil)
 	req := NewRequest(httpReq)
-	rule, params, err := r.MatchRequest(req)
+	route, err := r.MatchRequest(req)
 	assert.NoError(t, err)
-	assert.Equal(t, "pong", rule.Run(req, params))
+	assert.Equal(t, "pong", route.Run(req))
 }
 
 func TestRouteWhereConstraints(t *testing.T) {
@@ -77,33 +77,33 @@ func TestRouteWhereConstraints(t *testing.T) {
 	// 1. Valid numeric id -> should match
 	httpReq1, _ := http.NewRequest("GET", "/items/123", nil)
 	req1 := NewRequest(httpReq1)
-	rule1, params1, err1 := r.MatchRequest(req1)
+	route1, err1 := r.MatchRequest(req1)
 	assert.NoError(t, err1)
-	assert.NotNil(t, rule1)
-	assert.Equal(t, "item:123", rule1.Run(req1, params1))
+	assert.NotNil(t, route1)
+	assert.Equal(t, "item:123", route1.Run(req1))
 
 	// 2. Invalid alpha id -> should NOT match
 	httpReq2, _ := http.NewRequest("GET", "/items/abc", nil)
 	req2 := NewRequest(httpReq2)
-	_, _, err2 := r.MatchRequest(req2)
+	_, err2 := r.MatchRequest(req2)
 	assert.Error(t, err2)
 
 	// 3. Valid role enum -> should match
 	httpReq3, _ := http.NewRequest("GET", "/roles/admin", nil)
 	req3 := NewRequest(httpReq3)
-	rule3, params3, err3 := r.MatchRequest(req3)
+	route3, err3 := r.MatchRequest(req3)
 	assert.NoError(t, err3)
-	assert.Equal(t, "role:admin", rule3.Run(req3, params3))
+	assert.Equal(t, "role:admin", route3.Run(req3))
 
 	// 4. Invalid role enum -> should NOT match
 	httpReq4, _ := http.NewRequest("GET", "/roles/guest", nil)
 	req4 := NewRequest(httpReq4)
-	_, _, err4 := r.MatchRequest(req4)
+	_, err4 := r.MatchRequest(req4)
 	assert.Error(t, err4)
 }
 
 func TestSignedUrlAndSignatureValidation(t *testing.T) {
-	r := New()
+	r := New(WithSignatureKey("test-signature-key"))
 	r.Get("/download/{file}", func(file string) string {
 		return "download:" + file
 	}).Name("file.download")
@@ -125,6 +125,33 @@ func TestSignedUrlAndSignatureValidation(t *testing.T) {
 	httpReqTampered, _ := http.NewRequest("GET", tamperedUrl, nil)
 	reqTampered := NewRequest(httpReqTampered)
 	assert.False(t, r.HasValidSignature(reqTampered))
+}
+
+func TestSignedUrlWithoutKeyFailsClosed(t *testing.T) {
+	r := New()
+	r.Get("/download/{file}", func(file string) string {
+		return "download:" + file
+	}).Name("file.download")
+	r.Register()
+
+	// No signature key configured: signing must be disabled entirely,
+	// never fall back to a built-in default secret.
+	assert.Empty(t, r.SignedUrl("file.download", 1*time.Hour, nil))
+
+	httpReq, _ := http.NewRequest("GET", "/download/report.pdf?expires=9999999999&signature=deadbeef", nil)
+	assert.False(t, r.HasValidSignature(NewRequest(httpReq)))
+
+	// The key is supplied via the WithSignatureKey option (or UrlGenerator's
+	// SetKeyResolver); an explicit router has no runtime key setter.
+	r2 := New(WithSignatureKey("configured-key"))
+	r2.Get("/download/{file}", func(file string) string {
+		return "download:" + file
+	}).Name("file.download")
+	r2.Register()
+	signedUrl := r2.SignedUrl("file.download", 1*time.Hour, map[string]string{"file": "report.pdf"})
+	assert.Contains(t, signedUrl, "signature=")
+	httpReq2, _ := http.NewRequest("GET", signedUrl, nil)
+	assert.True(t, r2.HasValidSignature(NewRequest(httpReq2)))
 }
 
 func TestRouteHasAndCurrentNameAndIs(t *testing.T) {
@@ -157,9 +184,9 @@ func TestRouteHasAndCurrentNameAndIs(t *testing.T) {
 // --- Begin router_group_test.go ---
 func TestGroupInheritance(t *testing.T) {
 	r := New()
-	r.Prefix("/admin").Name("admin.").Group(func(group Router) {
+	r.Group(GroupAttributes{Prefix: "/admin", Name: "admin."}, func(group Router) {
 		group.Get("/profile", func() {}).Name("profile")
-		group.Prefix("/api").Name("api.").Group(func(api Router) {
+		group.Group(GroupAttributes{Prefix: "/api", Name: "api."}, func(api Router) {
 			api.Get("/users", func() {}).Name("users")
 		})
 	})
@@ -215,11 +242,11 @@ func TestControllerInjection(t *testing.T) {
 	httpReq, _ := http.NewRequest("GET", "/user/123", nil)
 	req := NewRequest(httpReq)
 
-	rule, params, err := r.MatchRequest(req)
+	route, err := r.MatchRequest(req)
 	assert.NoError(t, err)
-	assert.NotNil(t, rule)
+	assert.NotNil(t, route)
 
-	res := rule.Run(req, params)
+	res := route.Run(req)
 	assert.Equal(t, "Hello user 123", res)
 }
 
@@ -494,7 +521,7 @@ func TestRouter_MiddlewareAliasAndGroup(t *testing.T) {
 	}).Middleware("web")
 
 	// 3. Sub-group inheriting aliases
-	r.Prefix("/api").Middleware("auth").Group(func(sub Router) {
+	r.Group(GroupAttributes{Prefix: "/api", Middleware: []interface{}{"auth"}}, func(sub Router) {
 		sub.Get("/data", func() string {
 			return "data_ok"
 		})

@@ -264,31 +264,26 @@ func (h *TrimStringsMiddleware) isExcepted(key string) bool {
 
 // --- Begin validate_signature.go ---
 type ValidateSignatureMiddleware struct {
-	router Router
+	generator *UrlGenerator
 }
 
-// NewValidateSignatureMiddleware creates a new URL signature validation middleware.
-func NewValidateSignatureMiddleware(r ...Router) Handler {
-	var targetRouter Router
-	if len(r) > 0 && r[0] != nil {
-		targetRouter = r[0]
-	}
-	return &ValidateSignatureMiddleware{router: targetRouter}
+// NewValidateSignatureMiddleware creates a new URL signature validation
+// middleware backed by the given UrlGenerator (which owns the key resolver).
+func NewValidateSignatureMiddleware(ug *UrlGenerator) Handler {
+	return &ValidateSignatureMiddleware{generator: ug}
 }
 
 // Deprecated: Use ValidateSignatureMiddleware instead.
 type ValidateSignatureHandler = ValidateSignatureMiddleware
 
 // Deprecated: Use NewValidateSignatureMiddleware instead.
-func NewValidateSignatureHandler(r ...Router) Handler {
-	return NewValidateSignatureMiddleware(r...)
+func NewValidateSignatureHandler(ug *UrlGenerator) Handler {
+	return NewValidateSignatureMiddleware(ug)
 }
 
 func (h *ValidateSignatureMiddleware) Process(req *Request, next Closure) interface{} {
-	r := h.router
-
-	if r != nil {
-		if !r.HasValidSignature(req) {
+	if h.generator != nil {
+		if !h.generator.HasValidSignature(req) {
 			return NewResponse().
 				SetCode(http.StatusForbidden).
 				SetContent("Invalid signature.")
@@ -449,4 +444,3 @@ func (m *CookieMiddleware) Process(req *Request, next Closure) any {
 }
 
 // --- End middleware_cookie.go ---
-

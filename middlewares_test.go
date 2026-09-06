@@ -68,15 +68,19 @@ func TestTrimStringsMiddleware(t *testing.T) {
 }
 
 func TestValidateSignatureMiddleware(t *testing.T) {
-	r := New()
+	r := New(WithSignatureKey("test-signature-key"))
 	r.Get("/secret", func() string {
 		return "secret-data"
 	}).Name("secret.route")
 	r.Register()
 
-	signedUrl := r.SignedUrl("secret.route", 10*time.Minute, nil)
+	generator := NewUrlGenerator(r).SetKeyResolver(func() []string {
+		return []string{"test-signature-key"}
+	})
 
-	handler := NewValidateSignatureMiddleware(r)
+	signedUrl := generator.TemporarySignedRoute("secret.route", 10*time.Minute, nil)
+
+	handler := NewValidateSignatureMiddleware(generator)
 
 	// Valid signature
 	httpReq, _ := http.NewRequest("GET", signedUrl, nil)
@@ -99,7 +103,7 @@ func TestValidateSignatureMiddleware(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, respBad.GetCode())
 
 	// Test backward compatible alias
-	aliasHandler := NewValidateSignatureHandler(r)
+	aliasHandler := NewValidateSignatureHandler(generator)
 	assert.NotNil(t, aliasHandler)
 }
 
