@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"fmt"
 	"net/http"
 	"reflect"
 	"regexp"
@@ -40,6 +41,7 @@ type Route struct {
 	middlewares       []any
 	withoutMiddleware []any
 	wheres            map[string]string
+	bindingFields     map[string]string
 	defaults          map[string]any
 	metadata          map[string]any
 	fallback          bool
@@ -340,9 +342,16 @@ func (r *Route) compile() {
 			variant.parameterNames = compileParameterNames(pattern)
 
 			pat := strings.ReplaceAll(pattern, "/*", "/.*")
-			reg := regexp.MustCompile(`\{(\w+)\??\}`)
+			reg := regexp.MustCompile(`\{(\w+)(?::(\w+))?\??\}`)
 			regexStr := reg.ReplaceAllStringFunc(pat, func(m string) string {
-				paramName := strings.TrimSuffix(strings.Trim(m, "{}"), "?")
+				groups := reg.FindStringSubmatch(m)
+				paramName := groups[1]
+				if groups[2] != "" && r.bindingFields == nil {
+					r.bindingFields = map[string]string{}
+				}
+				if groups[2] != "" {
+					r.bindingFields[paramName] = groups[2]
+				}
 				if r.wheres != nil {
 					if constraint, ok := r.wheres[paramName]; ok {
 						return "(" + constraint + ")"
@@ -402,9 +411,38 @@ func (r *Route) parseParams(value reflect.Value, request *Request, parameters []
 		}
 
 		if paramIdx < len(parameters) {
-			strVal := parameters[paramIdx].value
+			p := parameters[paramIdx]
+			if cleanName, _ := splitBindingFieldName(p.name); cleanName != p.name {
+				p.name = cleanName
+			}
+
+			// 1. Explicit binder registered for the parameter name.
+			if r.router != nil {
+				if binder := r.router.getBinder(p.name); binder != nil {
+					val, err := binder(p.value, r)
+					if err != nil {
+						panic(fmt.Sprintf("flow: binding for parameter [%s] failed: %v", p.name, err))
+					}
+					if val != nil {
+						if v := reflect.ValueOf(val); v.Type().AssignableTo(t) {
+							paramIdx++
+							in = append(in, v)
+							continue
+						}
+					}
+				}
+			}
+
+			// 2. Implicit binding through the Routable contract.
+			if v, ok := implicitBindingArgument(t, p.value, r.bindingFieldFor(p.name), r); ok {
+				paramIdx++
+				in = append(in, v)
+				continue
+			}
+
+			// 3. Positional conversion.
 			paramIdx++
-			in = append(in, convertParamValue(strVal, t))
+			in = append(in, convertParamValue(p.value, t))
 			continue
 		}
 
@@ -414,15 +452,15 @@ func (r *Route) parseParams(value reflect.Value, request *Request, parameters []
 	return in
 }
 
-// compileParameterNames extracts the parameter names of a pattern.
+// compileParameterNames extracts the parameter names of a pattern, stripping
+// the binding field suffix of "{user:id}" syntax.
 func compileParameterNames(pattern string) []string {
-	reg := regexp.MustCompile(`\{(.*?)\}`)
+	reg := regexp.MustCompile(`\{(\w+)(?::(\w+))?\??\}`)
 	matches := reg.FindAllStringSubmatch(pattern, -1)
 
 	var result []string
 	for _, v := range matches {
-		name := strings.TrimSuffix(v[1], "?")
-		result = append(result, name)
+		result = append(result, v[1])
 	}
 
 	return result

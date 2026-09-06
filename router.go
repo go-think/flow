@@ -61,6 +61,8 @@ type Router interface {
 	WhereIn(name string, allowed []string) Router
 	// Has determines if the route collection contains a given named route.
 	Has(name string) bool
+	// Bind registers an explicit binder for a route parameter name.
+	Bind(key string, binder Binder)
 	// CurrentRouteName returns the current route name for the request.
 	CurrentRouteName(req *Request) string
 	// Is determines if the current route's name matches given patterns.
@@ -181,6 +183,7 @@ type router struct {
 	middlewareGroups   map[string][]interface{}
 	middlewarePriority []interface{}
 	parameterResolver  ParameterResolver
+	binders            map[string]Binder
 
 	collects []*router
 
