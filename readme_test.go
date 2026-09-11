@@ -101,7 +101,7 @@ func (m *TimingMiddleware) Process(req *flow.Request, next flow.Closure) interfa
 	res := next(req)
 	duration := time.Since(start)
 	if response, ok := res.(*flow.Response); ok {
-		response.Header.Set("X-Response-Time", duration.String())
+		response.Header("X-Response-Time", duration.String())
 	}
 	return res
 }
@@ -114,7 +114,7 @@ func TestReadme_MiddlewareSnippet(t *testing.T) {
 	})
 	resp, ok := res.(*flow.Response)
 	assert.True(t, ok)
-	assert.NotEmpty(t, resp.Header.Get("X-Response-Time"))
+	assert.NotEmpty(t, resp.Headers().Get("X-Response-Time"))
 }
 
 // Validate Session snippet in README.md
@@ -162,7 +162,7 @@ func TestReadme_StreamingAndResponse(t *testing.T) {
 		SetCode(http.StatusCreated).
 		SetContentType("application/json").
 		SetContent(`{"created": true}`)
-	res.Header.Set("X-Custom-Header", "Value")
+	res.Header("X-Custom-Header", "Value")
 	_ = res.Cookie("session_id", "session-token-value")
 	assert.Equal(t, http.StatusCreated, res.GetCode())
 }
@@ -180,11 +180,11 @@ func TestReadme_OptionalRouteSnippet(t *testing.T) {
 
 	httpReq1, _ := http.NewRequest("GET", "/profile", nil)
 	res1 := r.Dispatch(flow.NewRequest(httpReq1))
-	assert.Equal(t, "Tab: overview", res1.(*flow.Response).GetContent())
+	assert.Equal(t, "Tab: overview", res1.GetContent())
 
 	httpReq2, _ := http.NewRequest("GET", "/profile/security", nil)
 	res2 := r.Dispatch(flow.NewRequest(httpReq2))
-	assert.Equal(t, "Tab: security", res2.(*flow.Response).GetContent())
+	assert.Equal(t, "Tab: security", res2.GetContent())
 }
 
 // Validate Request helpers snippet in README.md
@@ -233,9 +233,9 @@ func TestReadme_RequestHelpersSnippet(t *testing.T) {
 func TestReadme_RedirectSnippet(t *testing.T) {
 	r1 := flow.Redirect("/dashboard")
 	assert.Equal(t, http.StatusFound, r1.GetCode())
-	assert.Equal(t, "/dashboard", r1.Header.Get("Location"))
+	assert.Equal(t, "/dashboard", r1.Headers().Get("Location"))
 
 	r2 := flow.Redirect("/legacy-path", http.StatusMovedPermanently)
 	assert.Equal(t, http.StatusMovedPermanently, r2.GetCode())
-	assert.Equal(t, "/legacy-path", r2.Header.Get("Location"))
+	assert.Equal(t, "/legacy-path", r2.Headers().Get("Location"))
 }

@@ -36,7 +36,6 @@ func TestRequestContextAndKV(t *testing.T) {
 	// Test request key-value pass-through
 	r.Set("trace_id", "abc-123")
 	val, ok := r.Get("trace_id")
-	assert.True(t, ok)
 	assert.Equal(t, "abc-123", val)
 
 	_, ok = r.Get("non_exist")
@@ -286,7 +285,7 @@ func TestDownload(t *testing.T) {
 		t.Fatalf("expected filePath %s, got %s", tmpFile, res.filePath)
 	}
 
-	disposition := res.Header.Get("Content-Disposition")
+	disposition := res.Headers().Get("Content-Disposition")
 	expected := "attachment; filename=\"custom.txt\""
 	if disposition != expected {
 		t.Fatalf("expected disposition %s, got %s", expected, disposition)
@@ -431,7 +430,7 @@ func TestRedirectResponse(t *testing.T) {
 	// 默认 302 重定向
 	resp1 := Redirect("/home")
 	assert.Equal(t, http.StatusFound, resp1.GetCode())
-	assert.Equal(t, "/home", resp1.Header.Get("Location"))
+	assert.Equal(t, "/home", resp1.Headers().Get("Location"))
 
 	rec1 := httptest.NewRecorder()
 	resp1.Send(rec1)
@@ -441,7 +440,7 @@ func TestRedirectResponse(t *testing.T) {
 	// 自定义 301 永久重定向
 	resp2 := Redirect("https://example.com/v2", http.StatusMovedPermanently)
 	assert.Equal(t, http.StatusMovedPermanently, resp2.GetCode())
-	assert.Equal(t, "https://example.com/v2", resp2.Header.Get("Location"))
+	assert.Equal(t, "https://example.com/v2", resp2.Headers().Get("Location"))
 
 	rec2 := httptest.NewRecorder()
 	resp2.Send(rec2)

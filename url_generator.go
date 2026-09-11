@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/url"
 	"regexp"
 	"sort"
@@ -24,6 +25,11 @@ type NamedRouteSource interface {
 	NamedRoutePattern(name string) (pattern string, ok bool)
 }
 
+// ActionRouteSource provides lookup of routes by controller action string (e.g. "UserController@index").
+type ActionRouteSource interface {
+	ActionRoutePattern(action string) (pattern string, ok bool)
+}
+
 // UrlGenerator builds URLs for named routes and creates/verifies signed URLs.
 //
 // The key resolver is consulted on every call: the first key signs new URLs,
@@ -35,16 +41,17 @@ type UrlGenerator struct {
 	keyResolver               func() []string
 	missingNamedRouteResolver func(name string, params map[string]string) string
 	requestProvider           func() *Request
+	baseURL                   string
 }
 
 // NewUrlGenerator creates a UrlGenerator bound to the given named-route
 // source (typically the router, or any of its group routers). A nil source is
 // a programming error and panics.
-func NewUrlGenerator(routes NamedRouteSource) *UrlGenerator {
+func NewUrlGenerator(routes NamedRouteSource, baseURL string) *UrlGenerator {
 	if routes == nil {
 		panic("flow: NewUrlGenerator requires a named route source (a router created by New)")
 	}
-	return &UrlGenerator{routes: routes}
+	return &UrlGenerator{routes: routes, baseURL: baseURL}
 }
 
 // SetKeyResolver sets the lazy key source, evaluated on every call so runtime
@@ -101,6 +108,26 @@ func (u *UrlGenerator) Route(name string, params map[string]string) (string, err
 		}
 	}
 	return "", &RouteNotFoundError{RouteName: name}
+}
+
+// Action resolves a controller action string into a path with its parameters interpolated.
+func (u *UrlGenerator) Action(action string, params map[string]string) (string, error) {
+	if u == nil || u.routes == nil {
+		return "", fmt.Errorf("flow: action [%s] not defined", action)
+	}
+	if actionSource, ok := u.routes.(ActionRouteSource); ok {
+		if pattern, found := actionSource.ActionRoutePattern(action); found {
+			url, err := u.toRoute(action, pattern, params)
+			if err != nil {
+				return "", err
+			}
+			if u.baseURL != "" {
+				url = strings.TrimSuffix(u.baseURL, "/") + url
+			}
+			return url, nil
+		}
+	}
+	return "", fmt.Errorf("flow: action [%s] not defined", action)
 }
 
 // toRoute interpolates parameters into a resolved route pattern. A
@@ -324,6 +351,9 @@ func (u *UrlGenerator) HasValidSignatureAbsolute(req *Request) bool {
 
 // absoluteURL joins scheme and host with a path (and its query, if present).
 func (u *UrlGenerator) absoluteURL(req *Request, pathWithQuery string) string {
+	if u.baseURL != "" {
+		return strings.TrimSuffix(u.baseURL, "/") + pathWithQuery
+	}
 	scheme := "http"
 	if req.Request.TLS != nil || strings.EqualFold(req.Header("X-Forwarded-Proto"), "https") || req.Request.URL != nil && req.Request.URL.Scheme == "https" {
 		scheme = "https"

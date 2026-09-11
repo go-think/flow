@@ -93,8 +93,11 @@ func (c *RouteCollection) Match(request *Request) (*Route, []*parameter, error) 
 		if handle, ps, _ := tree.getValue(path); handle != nil {
 			if route, ok := handle.(*Route); ok {
 				params := paramsFromTree(ps)
-				if route.ValidateParams(params) && routeMatchesScheme(route, request) && routeMatchesDomain(route, request) {
-					return route, params, nil
+				if route.ValidateParams(params) && routeMatchesScheme(route, request) {
+					if hostMatched, hostParams := routeMatchesDomain(route, request); hostMatched {
+						allParams := append(hostParams, params...)
+						return route, allParams, nil
+					}
 				}
 			}
 		}
@@ -106,26 +109,38 @@ func (c *RouteCollection) Match(request *Request) (*Route, []*parameter, error) 
 		}
 		route.compile()
 		if params, ok := route.matchRegex(path); ok {
-			if route.ValidateParams(params) {
-				return route, params, nil
+			if route.ValidateParams(params) && routeMatchesScheme(route, request) {
+				if hostMatched, hostParams := routeMatchesDomain(route, request); hostMatched {
+					allParams := append(hostParams, params...)
+					return route, allParams, nil
+				}
 			}
 		}
 	}
 
 	// The path may exist for other verbs only: collect them for a 405.
+	// HEAD is an automatic alias of GET and never triggers a 405 by itself.
 	var allowed []string
 	for m, tree := range c.tries {
-		if m == method {
+		if m == method || (m == "HEAD" && method == "GET") || (m == "GET" && method == "HEAD") {
 			continue
 		}
 		if handle, _, _ := tree.getValue(path); handle != nil {
-			allowed = append(allowed, m)
+			if route, ok := handle.(*Route); ok {
+				if hostMatched, _ := routeMatchesDomain(route, request); hostMatched && routeMatchesScheme(route, request) {
+					allowed = append(allowed, m)
+				}
+			} else {
+				allowed = append(allowed, m)
+			}
 			continue
 		}
 		for _, route := range c.regexes[m] {
 			if route.matchesPath(path) {
-				allowed = append(allowed, m)
-				break
+				if hostMatched, _ := routeMatchesDomain(route, request); hostMatched && routeMatchesScheme(route, request) {
+					allowed = append(allowed, m)
+					break
+				}
 			}
 		}
 	}
@@ -137,10 +152,28 @@ func (c *RouteCollection) Match(request *Request) (*Route, []*parameter, error) 
 	return nil, nil, ErrRouteNotFound
 }
 
-// GetByName returns the route registered under the given name.
-func (c *RouteCollection) GetByName(name string) (*Route, bool) {
-	route, ok := c.byName[name]
-	return route, ok
+// GetByName returns the route registered under the given name, or nil.
+func (c *RouteCollection) GetByName(name string) *Route {
+	return c.byName[name]
+}
+
+// GetByAction returns the route registered with the given action string (e.g. "UserController@index").
+func (c *RouteCollection) GetByAction(action string) (*Route, bool) {
+	for _, route := range c.routes {
+		if route.ActionName() == action {
+			return route, true
+		}
+	}
+	return nil, false
+}
+
+// ReindexName updates the by-name index after a route's name was changed
+// post-registration (immediate-registration mode).
+func (c *RouteCollection) ReindexName(route *Route) {
+	if c.byName == nil {
+		c.byName = make(map[string]*Route)
+	}
+	c.byName[route.GetName()] = route
 }
 
 // HasNamedRoute reports whether a route with the given name exists.
@@ -152,6 +185,24 @@ func (c *RouteCollection) HasNamedRoute(name string) bool {
 // All returns every registered route in registration order.
 func (c *RouteCollection) All() []*Route {
 	return c.routes
+}
+
+// ActionRoutePattern implements the action lookup used by the URL generator.
+func (c *RouteCollection) ActionRoutePattern(action string) (string, bool) {
+	route, ok := c.GetByAction(action)
+	if !ok || route == nil {
+		return "", false
+	}
+	return route.URI(), true
+}
+
+// NamedRoutePattern implements NamedRouteSource for the collection.
+func (c *RouteCollection) NamedRoutePattern(name string) (string, bool) {
+	route := c.GetByName(name)
+	if route == nil {
+		return "", false
+	}
+	return route.URI(), true
 }
 
 // matchesPath reports whether the path matches any variant of the route,
@@ -191,39 +242,60 @@ func (r *Route) matchRegex(path string) ([]*parameter, bool) {
 	return nil, false
 }
 
-// routeMatchesScheme checks the HTTPS requirement of a route against the
-// request (TLS connection or X-Forwarded-Proto header).
+// routeMatchesScheme checks the HTTPS or HTTP requirement of a route against the request.
 func routeMatchesScheme(route *Route, request *Request) bool {
-	if !route.IsSecure() {
-		return true
-	}
 	httpReq := request.GetHttpRequest()
-	if httpReq == nil {
-		return true
+	isSecure := false
+	if httpReq != nil {
+		if httpReq.TLS != nil || strings.EqualFold(httpReq.Header.Get("X-Forwarded-Proto"), "https") {
+			isSecure = true
+		}
 	}
-	if httpReq.TLS != nil {
-		return true
+
+	if route.IsSecure() && !isSecure {
+		return false
 	}
-	proto := httpReq.Header.Get("X-Forwarded-Proto")
-	return strings.EqualFold(proto, "https")
+	if route.IsHttpOnly() && isSecure {
+		return false
+	}
+	return true
 }
 
-// routeMatchesDomain checks the host restriction of a route against the
-// request host.
-func routeMatchesDomain(route *Route, request *Request) bool {
+// routeMatchesDomain checks the host restriction of a route against the request host
+// and extracts dynamic subdomain parameters if declared (e.g. "{account}.example.com").
+func routeMatchesDomain(route *Route, request *Request) (bool, []*parameter) {
 	domain := route.GetDomain()
 	if domain == "" {
-		return true
+		return true, nil
 	}
 	httpReq := request.GetHttpRequest()
 	if httpReq == nil {
-		return true
+		return true, nil
 	}
 	host := httpReq.Host
 	if idx := strings.Index(host, ":"); idx != -1 {
 		host = host[:idx]
 	}
-	return strings.EqualFold(host, domain)
+
+	route.compile()
+
+	// 1. Dynamic regex host
+	if route.compiledHostRegex != nil {
+		matches := route.compiledHostRegex.FindStringSubmatch(host)
+		if len(matches) <= 1 {
+			return false, nil
+		}
+		var hostParams []*parameter
+		for idx, name := range route.hostParameterNames {
+			if idx+1 < len(matches) {
+				hostParams = append(hostParams, &parameter{name: name, value: matches[idx+1]})
+			}
+		}
+		return true, hostParams
+	}
+
+	// 2. Exact static host match
+	return strings.EqualFold(host, domain), nil
 }
 
 func paramsFromTree(ps Params) []*parameter {

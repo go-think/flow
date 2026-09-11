@@ -11,7 +11,7 @@ import (
 
 func TestUrlGeneratorRequestHelpers(t *testing.T) {
 	current := "/current/path"
-	ug := NewUrlGenerator(fakeRouteSource{}).SetRequestProvider(func() *Request {
+	ug := NewUrlGenerator(fakeRouteSource{}, "").SetRequestProvider(func() *Request {
 		httpReq, _ := http.NewRequest("GET", current, nil)
 		return NewRequest(httpReq)
 	})
@@ -28,7 +28,7 @@ func TestRouteGenerationErrorOnMissingParams(t *testing.T) {
 	r := New()
 	r.Get("/users/{id}/posts/{post}", func() string { return "x" }).Name("user.post")
 	r.Register()
-	ug := NewUrlGenerator(r)
+	ug := NewUrlGenerator(r, "")
 
 	_, err := ug.Route("user.post", map[string]string{"id": "1"})
 	genErr, ok := err.(*UrlGenerationError)
@@ -83,7 +83,7 @@ func TestRouteCacheRoundTrip(t *testing.T) {
 	httpReq, _ := http.NewRequest("GET", "/cached/9", nil)
 	req := NewRequest(httpReq)
 	req.SetResponseWriter(httptest.NewRecorder())
-	res := r2.Dispatch(req).(*Response)
+	res := r2.Dispatch(req)
 	assert.Equal(t, "cached:9", res.GetContent())
 }
 
@@ -92,7 +92,7 @@ func TestRedirector(t *testing.T) {
 	r.Get("/target", func() string { return "t" }).Name("target.route")
 	r.Register()
 
-	ug := NewUrlGenerator(r)
+	ug := NewUrlGenerator(r, "")
 	current := "/here"
 	rd := NewRedirector(ug).SetRequestProvider(func() *Request {
 		httpReq, _ := http.NewRequest("GET", current, nil)
@@ -102,7 +102,7 @@ func TestRedirector(t *testing.T) {
 	// Route redirect resolves through the generator.
 	res := rd.Route("target.route", nil)
 	assert.Equal(t, 302, res.GetCode())
-	assert.Equal(t, "/target", res.Header.Get("Location"))
+	assert.Equal(t, "/target", res.Headers().Get("Location"))
 
 	// Custom status.
 	res = rd.Route("target.route", nil, 301)
@@ -110,7 +110,7 @@ func TestRedirector(t *testing.T) {
 
 	// Refresh redirects to the current path.
 	res = rd.Refresh()
-	assert.Equal(t, "/here", res.Header.Get("Location"))
+	assert.Equal(t, "/here", res.Headers().Get("Location"))
 
 	// To with custom status.
 	res = rd.To("/somewhere", 303)
@@ -119,7 +119,7 @@ func TestRedirector(t *testing.T) {
 	// Signed route redirect.
 	ug.SetKeyResolver(func() []string { return []string{"k"} })
 	res = rd.SignedRoute("target.route", nil)
-	assert.Contains(t, res.Header.Get("Location"), "signature=")
+	assert.Contains(t, res.Headers().Get("Location"), "signature=")
 }
 
 func TestRedirectRoutes(t *testing.T) {
@@ -132,15 +132,15 @@ func TestRedirectRoutes(t *testing.T) {
 	httpReq, _ := http.NewRequest("GET", "/old", nil)
 	req := NewRequest(httpReq)
 	req.SetResponseWriter(rec)
-	res := r.Dispatch(req).(*Response)
+	res := r.Dispatch(req)
 	assert.Equal(t, 302, res.GetCode())
-	assert.Equal(t, "/new", res.Header.Get("Location"))
+	assert.Equal(t, "/new", res.Headers().Get("Location"))
 
 	rec2 := httptest.NewRecorder()
 	httpReq2, _ := http.NewRequest("GET", "/legacy", nil)
 	req2 := NewRequest(httpReq2)
 	req2.SetResponseWriter(rec2)
-	res2 := r.Dispatch(req2).(*Response)
+	res2 := r.Dispatch(req2)
 	assert.Equal(t, 301, res2.GetCode())
 }
 
@@ -150,7 +150,7 @@ func TestSignedRouteAbsolute(t *testing.T) {
 	r.Register()
 
 	httpReq, _ := http.NewRequest("GET", "https://example.com/start", nil)
-	ug := NewUrlGenerator(r).SetKeyResolver(func() []string { return []string{"key-a"} }).SetRequestProvider(func() *Request {
+	ug := NewUrlGenerator(r, "").SetKeyResolver(func() []string { return []string{"key-a"} }).SetRequestProvider(func() *Request {
 		return NewRequest(httpReq)
 	})
 

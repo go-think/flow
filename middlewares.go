@@ -174,22 +174,22 @@ func (h *CorsMiddleware) determineAllowedOrigin(origin string) string {
 
 func (h *CorsMiddleware) applyHeaders(res *Response, allowOrigin string) {
 	if allowOrigin != "" {
-		res.Header.Set("Access-Control-Allow-Origin", allowOrigin)
+		res.Header("Access-Control-Allow-Origin", allowOrigin)
 	}
 	if len(h.config.AllowMethods) > 0 {
-		res.Header.Set("Access-Control-Allow-Methods", strings.Join(h.config.AllowMethods, ", "))
+		res.Header("Access-Control-Allow-Methods", strings.Join(h.config.AllowMethods, ", "))
 	}
 	if len(h.config.AllowHeaders) > 0 {
-		res.Header.Set("Access-Control-Allow-Headers", strings.Join(h.config.AllowHeaders, ", "))
+		res.Header("Access-Control-Allow-Headers", strings.Join(h.config.AllowHeaders, ", "))
 	}
 	if len(h.config.ExposeHeaders) > 0 {
-		res.Header.Set("Access-Control-Expose-Headers", strings.Join(h.config.ExposeHeaders, ", "))
+		res.Header("Access-Control-Expose-Headers", strings.Join(h.config.ExposeHeaders, ", "))
 	}
 	if h.config.AllowCredentials && allowOrigin != "*" {
-		res.Header.Set("Access-Control-Allow-Credentials", "true")
+		res.Header("Access-Control-Allow-Credentials", "true")
 	}
 	if h.config.MaxAge > 0 {
-		res.Header.Set("Access-Control-Max-Age", strconv.Itoa(h.config.MaxAge))
+		res.Header("Access-Control-Max-Age", strconv.Itoa(h.config.MaxAge))
 	}
 }
 

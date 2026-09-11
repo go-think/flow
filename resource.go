@@ -38,13 +38,22 @@ var apiResourceExcluded = map[string]bool{"Create": true, "Edit": true}
 
 // ResourceOptions restrict and customize a resource registration.
 type ResourceOptions struct {
-	Only       []string
-	Except     []string
-	Middleware []any
-	Wheres     map[string]string
-	Names      map[string]string // action -> full route name override
-	NamePrefix string
-	Shallow    bool
+	Only                 []string
+	Except               []string
+	Middleware           []any
+	MiddlewareFor        map[string][]any
+	WithoutMiddleware    []any
+	WithoutMiddlewareFor map[string][]any
+	Wheres               map[string]string
+	Names                map[string]string // action -> full route name override
+	NamePrefix           string
+	Parameters           map[string]string // segment -> parameter placeholder override
+	Shallow              bool
+	Creatable            bool
+	Destroyable          bool
+	Trashed              []string
+	Missing              func(req *Request, err error) any
+	Scoped               bool
 }
 
 func (o *ResourceOptions) applies(action string) bool {
@@ -62,7 +71,7 @@ func (o *ResourceOptions) applies(action string) bool {
 type PendingResourceRegistration struct {
 	router     Router
 	name       string
-	controller string
+	controller any
 	options    ResourceOptions
 	singleton  bool
 	registered bool
@@ -87,10 +96,97 @@ func (p *PendingResourceRegistration) Middleware(middleware ...any) *PendingReso
 	return p
 }
 
+// MiddlewareFor attaches middleware to specific actions of the resource.
+func (p *PendingResourceRegistration) MiddlewareFor(actions []string, middleware ...any) *PendingResourceRegistration {
+	if p.options.MiddlewareFor == nil {
+		p.options.MiddlewareFor = make(map[string][]any)
+	}
+	for _, action := range actions {
+		p.options.MiddlewareFor[action] = append(p.options.MiddlewareFor[action], middleware...)
+	}
+	return p
+}
+
+// WithoutMiddleware excludes middleware from every resource route.
+func (p *PendingResourceRegistration) WithoutMiddleware(middleware ...any) *PendingResourceRegistration {
+	p.options.WithoutMiddleware = append(p.options.WithoutMiddleware, middleware...)
+	return p
+}
+
+// WithoutMiddlewareFor excludes middleware from specific actions of the resource.
+func (p *PendingResourceRegistration) WithoutMiddlewareFor(actions []string, middleware ...any) *PendingResourceRegistration {
+	if p.options.WithoutMiddlewareFor == nil {
+		p.options.WithoutMiddlewareFor = make(map[string][]any)
+	}
+	for _, action := range actions {
+		p.options.WithoutMiddlewareFor[action] = append(p.options.WithoutMiddlewareFor[action], middleware...)
+	}
+	return p
+}
+
+// Parameters sets explicit parameter names for segments.
+func (p *PendingResourceRegistration) Parameters(parameters map[string]string) *PendingResourceRegistration {
+	if p.options.Parameters == nil {
+		p.options.Parameters = make(map[string]string)
+	}
+	for k, v := range parameters {
+		p.options.Parameters[k] = v
+	}
+	return p
+}
+
+// Parameter sets an explicit parameter name for a segment.
+func (p *PendingResourceRegistration) Parameter(previous, newParam string) *PendingResourceRegistration {
+	if p.options.Parameters == nil {
+		p.options.Parameters = make(map[string]string)
+	}
+	p.options.Parameters[previous] = newParam
+	return p
+}
+
+// Creatable enables create and store actions on singleton resources.
+func (p *PendingResourceRegistration) Creatable() *PendingResourceRegistration {
+	p.options.Creatable = true
+	return p
+}
+
+// Destroyable enables destroy action on singleton resources.
+func (p *PendingResourceRegistration) Destroyable() *PendingResourceRegistration {
+	p.options.Destroyable = true
+	return p
+}
+
+// WithTrashed enables trashed entity binding on resource routes (or specific actions).
+func (p *PendingResourceRegistration) WithTrashed(methods ...string) *PendingResourceRegistration {
+	p.options.Trashed = append(p.options.Trashed, methods...)
+	return p
+}
+
+// Missing sets the fallback callback when a bound resource parameter is missing.
+func (p *PendingResourceRegistration) Missing(callback func(req *Request, err error) any) *PendingResourceRegistration {
+	p.options.Missing = callback
+	return p
+}
+
+// Scoped enables scoped child model bindings on nested resource routes.
+func (p *PendingResourceRegistration) Scoped() *PendingResourceRegistration {
+	p.options.Scoped = true
+	return p
+}
+
 // Names sets explicit route names per action, overriding the default
 // "name.action" convention.
 func (p *PendingResourceRegistration) Names(names map[string]string) *PendingResourceRegistration {
 	p.options.Names = names
+	return p
+}
+
+// Name sets an explicit route name for a specific action.
+func (p *PendingResourceRegistration) Name(action, name string) *PendingResourceRegistration {
+	if p.options.Names == nil {
+		p.options.Names = make(map[string]string)
+	}
+	p.options.Names[action] = name
 	return p
 }
 
@@ -128,6 +224,25 @@ func (p *PendingResourceRegistration) register() {
 	verbs := resourceVerbs
 	if p.singleton {
 		verbs = singletonResourceVerbs
+		if p.options.Creatable {
+			verbs = append([]resourceVerb{
+				{action: "Create", method: "GET", uri: "/create", hasParam: false},
+				{action: "Store", method: "POST", uri: "", hasParam: false},
+			}, verbs...)
+		}
+		if p.options.Destroyable {
+			verbs = append(verbs, resourceVerb{action: "Destroy", method: "DELETE", uri: "", hasParam: false})
+		}
+	}
+
+	// Resolve parameter names for segments with overrides if present.
+	resolveParam := func(seg string) string {
+		if p.options.Parameters != nil {
+			if override, ok := p.options.Parameters[seg]; ok {
+				return override
+			}
+		}
+		return singularize(seg)
 	}
 
 	// A nested name ("albums.photos") becomes
@@ -139,17 +254,14 @@ func (p *PendingResourceRegistration) register() {
 		pathBuilder.WriteString("/")
 		pathBuilder.WriteString(seg)
 		if i < len(segments)-1 {
-			pathBuilder.WriteString("/{" + singularize(seg) + "}")
+			pathBuilder.WriteString("/{" + resolveParam(seg) + "}")
 		}
 	}
 	path := pathBuilder.String()
-	param := singularize(lastSegment(p.name))
+	param := resolveParam(lastSegment(p.name))
 
 	for _, rv := range verbs {
 		if !p.options.applies(rv.action) {
-			continue
-		}
-		if p.singleton && rv.action == "Store" {
 			continue
 		}
 
@@ -167,11 +279,48 @@ func (p *PendingResourceRegistration) register() {
 
 		routeName := p.routeName(rv.action)
 
-		child := p.router.Add(Method(rv.method), routePath, p.controller+"@"+rv.action)
+		var action any
+		if name, isName := p.controller.(string); isName {
+			action = name + "@" + rv.action
+		} else {
+			action = ControllerAction{Controller: p.controller, Method: rv.action}
+		}
+		child := p.router.Add(Method(rv.method), routePath, action)
 		child.Name(routeName)
 		child.Middleware(p.options.Middleware...)
+		if forAction, ok := p.options.MiddlewareFor[rv.action]; ok {
+			child.Middleware(forAction...)
+		}
+		if forAction, ok := p.options.MiddlewareFor[strings.ToLower(rv.action)]; ok {
+			child.Middleware(forAction...)
+		}
+		if len(p.options.WithoutMiddleware) > 0 {
+			child.WithoutMiddleware(p.options.WithoutMiddleware...)
+		}
+		if withoutAction, ok := p.options.WithoutMiddlewareFor[rv.action]; ok {
+			child.WithoutMiddleware(withoutAction...)
+		}
+		if withoutAction, ok := p.options.WithoutMiddlewareFor[strings.ToLower(rv.action)]; ok {
+			child.WithoutMiddleware(withoutAction...)
+		}
 		for k, v := range p.options.Wheres {
 			child.Where(k, v)
+		}
+		if rChild, ok := child.(*router); ok {
+			if p.options.Scoped {
+				rChild.scopedBindings = true
+			}
+			if len(p.options.Trashed) > 0 {
+				for _, m := range p.options.Trashed {
+					if strings.EqualFold(m, rv.action) {
+						rChild.withTrashed = true
+						break
+					}
+				}
+			}
+			if p.options.Missing != nil {
+				rChild.missing = p.options.Missing
+			}
 		}
 	}
 }

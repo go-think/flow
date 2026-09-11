@@ -16,7 +16,7 @@ func (c *testUserController) Middleware() []ControllerMiddleware {
 		{Handler: func(req *Request, next Closure) any {
 			res := next(req)
 			if res2, ok := res.(*Response); ok {
-				res2.Header.Set("X-Controller", "yes")
+				res2.Header("X-Controller", "yes")
 				return res2
 			}
 			return res
@@ -52,11 +52,10 @@ func TestControllerActionStringRegistration(t *testing.T) {
 	req.SetResponseWriter(httptest.NewRecorder())
 	res := r.Dispatch(req)
 
-	resp, ok := res.(*Response)
-	assert.True(t, ok)
+	resp := res
 	assert.Equal(t, "show:42", resp.GetContent())
 	// Controller middleware declared without filters applies.
-	assert.Equal(t, "yes", resp.Header.Get("X-Controller"))
+	assert.Equal(t, "yes", resp.Headers().Get("X-Controller"))
 }
 
 func TestControllerMiddlewareOnlyExcept(t *testing.T) {
@@ -69,7 +68,7 @@ func TestControllerMiddlewareOnlyExcept(t *testing.T) {
 	// Show: Only-filter middleware applies, Except-filter does not.
 	req1 := NewRequest(mustRequest("PUT", "/users/42"))
 	req1.SetResponseWriter(httptest.NewRecorder())
-	res1 := r.Dispatch(req1).(*Response)
+	res1 := r.Dispatch(req1)
 	assert.Equal(t, "update:42", res1.GetContent())
 	// Update is excluded by Except but the Except-declared entry only skips
 	// Show; the Only entry skips Update. Both unfiltered entries already ran.
@@ -98,7 +97,7 @@ func TestInvokableControllerAction(t *testing.T) {
 	httpReq, _ := http.NewRequest("GET", "/invoke", nil)
 	req := NewRequest(httpReq)
 	req.SetResponseWriter(httptest.NewRecorder())
-	res := r.Dispatch(req).(*Response)
+	res := r.Dispatch(req)
 	assert.Equal(t, "invoked", res.GetContent())
 }
 
@@ -113,7 +112,7 @@ func TestControllerNamespacePrefix(t *testing.T) {
 	httpReq, _ := http.NewRequest("GET", "/admin/users/7", nil)
 	req := NewRequest(httpReq)
 	req.SetResponseWriter(httptest.NewRecorder())
-	res := r.Dispatch(req).(*Response)
+	res := r.Dispatch(req)
 	assert.Equal(t, "show:7", res.GetContent())
 }
 

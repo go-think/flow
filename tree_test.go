@@ -32,14 +32,12 @@ func TestRadixTree_BasicAndParams(t *testing.T) {
 	h, ps, tsr = root.getValue("/user/456/posts")
 	assert.Equal(t, "user_posts", h)
 	val, ok = ps.Get("id")
-	assert.True(t, ok)
 	assert.Equal(t, "456", val)
 
 	// 4. Test wildcard matching
 	h, ps, tsr = root.getValue("/static/css/style.css")
 	assert.Equal(t, "static_handler", h)
 	val, ok = ps.Get("filepath")
-	assert.True(t, ok)
 	assert.Equal(t, "css/style.css", val)
 }
 

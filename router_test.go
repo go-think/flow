@@ -169,8 +169,7 @@ func TestRouteHasAndCurrentNameAndIs(t *testing.T) {
 	httpReq, _ := http.NewRequest("GET", "/admin/dashboard", nil)
 	req := NewRequest(httpReq)
 	res := r.Dispatch(req)
-	resp, ok := res.(*Response)
-	assert.True(t, ok)
+	resp := res
 	assert.Equal(t, "admin-ok", resp.GetContent())
 
 	assert.Equal(t, "admin.dashboard", r.CurrentRouteName(req))
@@ -282,8 +281,7 @@ func TestRouteAllHttpVerbs(t *testing.T) {
 		assert.NoError(t, err)
 		req := NewRequest(httpReq)
 		res := r.Dispatch(req)
-		resp, ok := res.(*Response)
-		assert.True(t, ok)
+		resp := res
 		assert.Equal(t, tc.expected, resp.GetContent())
 	}
 }
@@ -299,15 +297,13 @@ func TestRouteFallback(t *testing.T) {
 	// 1. Valid route
 	httpReq1, _ := http.NewRequest("GET", "/valid", nil)
 	res1 := r.Dispatch(NewRequest(httpReq1))
-	resp1, ok := res1.(*Response)
-	assert.True(t, ok)
+	resp1 := res1
 	assert.Equal(t, "valid", resp1.GetContent())
 
 	// 2. Unmatched route triggers fallback
 	httpReq2, _ := http.NewRequest("GET", "/missing/page", nil)
 	res2 := r.Dispatch(NewRequest(httpReq2))
-	resp2, ok := res2.(*Response)
-	assert.True(t, ok)
+	resp2 := res2
 	assert.Equal(t, http.StatusNotFound, resp2.GetCode())
 	assert.Equal(t, "custom_fallback:/missing/page", resp2.GetContent())
 
@@ -316,8 +312,7 @@ func TestRouteFallback(t *testing.T) {
 	rNoFallback.Register()
 	httpReq3, _ := http.NewRequest("GET", "/not-exist", nil)
 	res3 := rNoFallback.Dispatch(NewRequest(httpReq3))
-	resp3, ok := res3.(*Response)
-	assert.True(t, ok)
+	resp3 := res3
 	assert.Equal(t, http.StatusNotFound, resp3.GetCode())
 	assert.Equal(t, "Not Found", resp3.GetContent())
 }
@@ -341,8 +336,7 @@ func TestRouteStaticFiles(t *testing.T) {
 	req := NewRequest(httpReq)
 	req.SetResponseWriter(rec)
 	res := r.Dispatch(req)
-	resp, ok := res.(*Response)
-	assert.True(t, ok)
+	resp := res
 	assert.True(t, resp.handled)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "console.log('test static');", rec.Body.String())
@@ -374,13 +368,13 @@ func TestRouteOptionalParameters(t *testing.T) {
 	httpReq1, _ := http.NewRequest("GET", "/user/alice", nil)
 	req1 := NewRequest(httpReq1)
 	res1 := r.Dispatch(req1)
-	assert.Equal(t, "arg:alice,req:alice", res1.(*Response).GetContent())
+	assert.Equal(t, "arg:alice,req:alice", res1.GetContent())
 
 	// 1.2 省略参数
 	httpReq2, _ := http.NewRequest("GET", "/user", nil)
 	req2 := NewRequest(httpReq2)
 	res2 := r.Dispatch(req2)
-	assert.Equal(t, "arg:,req:", res2.(*Response).GetContent())
+	assert.Equal(t, "arg:,req:", res2.GetContent())
 	val2, err2 := req2.RouteParam("name")
 	assert.NoError(t, err2)
 	assert.Equal(t, "", val2)
@@ -389,26 +383,26 @@ func TestRouteOptionalParameters(t *testing.T) {
 	// 2.1 全提供
 	httpReq3, _ := http.NewRequest("GET", "/posts/2026/09", nil)
 	res3 := r.Dispatch(NewRequest(httpReq3))
-	assert.Equal(t, "y:2026,m:09", res3.(*Response).GetContent())
+	assert.Equal(t, "y:2026,m:09", res3.GetContent())
 
 	// 2.2 提供一个
 	httpReq4, _ := http.NewRequest("GET", "/posts/2026", nil)
 	res4 := r.Dispatch(NewRequest(httpReq4))
-	assert.Equal(t, "y:2026,m:", res4.(*Response).GetContent())
+	assert.Equal(t, "y:2026,m:", res4.GetContent())
 
 	// 2.3 全省略
 	httpReq5, _ := http.NewRequest("GET", "/posts", nil)
 	res5 := r.Dispatch(NewRequest(httpReq5))
-	assert.Equal(t, "y:,m:", res5.(*Response).GetContent())
+	assert.Equal(t, "y:,m:", res5.GetContent())
 
 	// --- 验证 3. 中间必选、末尾可选 ---
 	httpReq6, _ := http.NewRequest("GET", "/groups/golang/members/42", nil)
 	res6 := r.Dispatch(NewRequest(httpReq6))
-	assert.Equal(t, "golang:42", res6.(*Response).GetContent())
+	assert.Equal(t, "golang:42", res6.GetContent())
 
 	httpReq7, _ := http.NewRequest("GET", "/groups/golang/members", nil)
 	res7 := r.Dispatch(NewRequest(httpReq7))
-	assert.Equal(t, "golang:", res7.(*Response).GetContent())
+	assert.Equal(t, "golang:", res7.GetContent())
 
 	// --- 验证 4. 命名路由 Url 生成与清理 ---
 	assert.Equal(t, "/user/alice", r.Url("user.show", map[string]string{"name": "alice"}))
@@ -423,11 +417,11 @@ func TestRouteOptionalParameters(t *testing.T) {
 
 	httpReq8, _ := http.NewRequest("GET", "/zh-CN", nil)
 	res8 := rRoot.Dispatch(NewRequest(httpReq8))
-	assert.Equal(t, "locale:zh-CN", res8.(*Response).GetContent())
+	assert.Equal(t, "locale:zh-CN", res8.GetContent())
 
 	httpReq9, _ := http.NewRequest("GET", "/", nil)
 	res9 := rRoot.Dispatch(NewRequest(httpReq9))
-	assert.Equal(t, "locale:", res9.(*Response).GetContent())
+	assert.Equal(t, "locale:", res9.GetContent())
 }
 
 type mockStructResolver struct {
@@ -464,7 +458,7 @@ func TestRouter_ParameterResolverInterface(t *testing.T) {
 	httpReq, _ := http.NewRequest("GET", "/user/999", nil)
 	req := NewRequest(httpReq)
 	res := r.Dispatch(req)
-	assert.Equal(t, "Hi user 999", res.(*Response).GetContent())
+	assert.Equal(t, "Hi user 999", res.GetContent())
 
 	// 4. Verify Signed URL with instance signatureKey
 	signedUrl := r.SignedUrl("user.show", 10*time.Minute, map[string]string{"id": "999"})
@@ -533,28 +527,28 @@ func TestRouter_MiddlewareAliasAndGroup(t *testing.T) {
 	executed = nil
 	httpReq1, _ := http.NewRequest("GET", "/admin", nil)
 	res1 := r.Dispatch(NewRequest(httpReq1))
-	assert.Equal(t, "admin_ok", res1.(*Response).GetContent())
+	assert.Equal(t, "admin_ok", res1.GetContent())
 	assert.Equal(t, []string{"auth"}, executed)
 
 	// Test /user
 	executed = nil
 	httpReq2, _ := http.NewRequest("GET", "/user", nil)
 	res2 := r.Dispatch(NewRequest(httpReq2))
-	assert.Equal(t, "user_ok", res2.(*Response).GetContent())
+	assert.Equal(t, "user_ok", res2.GetContent())
 	assert.Equal(t, []string{"role:admin"}, executed)
 
 	// Test /home
 	executed = nil
 	httpReq3, _ := http.NewRequest("GET", "/home", nil)
 	res3 := r.Dispatch(NewRequest(httpReq3))
-	assert.Equal(t, "home_ok", res3.(*Response).GetContent())
+	assert.Equal(t, "home_ok", res3.GetContent())
 	assert.Equal(t, []string{"web_1", "web_2"}, executed)
 
 	// Test /api/data
 	executed = nil
 	httpReq4, _ := http.NewRequest("GET", "/api/data", nil)
 	res4 := r.Dispatch(NewRequest(httpReq4))
-	assert.Equal(t, "data_ok", res4.(*Response).GetContent())
+	assert.Equal(t, "data_ok", res4.GetContent())
 	assert.Equal(t, []string{"auth"}, executed)
 }
 
@@ -575,7 +569,7 @@ func TestRouter_CustomParameterResolver(t *testing.T) {
 
 	httpReq, _ := http.NewRequest("GET", "/custom/hello", nil)
 	res := r.Dispatch(NewRequest(httpReq))
-	assert.Equal(t, "got:custom_injected", res.(*Response).GetContent())
+	assert.Equal(t, "got:custom_injected", res.GetContent())
 }
 
 

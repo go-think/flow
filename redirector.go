@@ -80,6 +80,15 @@ func (r *Redirector) Route(name string, params map[string]string, status ...int)
 	return r.To(url, status...)
 }
 
+// Action redirects to a route associated with a controller action.
+func (r *Redirector) Action(action string, params map[string]string, status ...int) *Response {
+	url, err := r.generator.Action(action, params)
+	if err != nil {
+		panic(err)
+	}
+	return r.To(url, status...)
+}
+
 // SignedRoute redirects to a signed named route.
 func (r *Redirector) SignedRoute(name string, params map[string]string, status ...int) *Response {
 	return r.To(r.generator.SignedRoute(name, params), status...)

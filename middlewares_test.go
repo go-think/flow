@@ -22,10 +22,9 @@ func TestCorsMiddleware_PreflightAndNormal(t *testing.T) {
 		return NewResponse().SetContent("ok")
 	})
 
-	resp, ok := res.(*Response)
-	assert.True(t, ok)
+	resp := res.(*Response)
 	assert.Equal(t, http.StatusNoContent, resp.GetCode())
-	assert.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "*", resp.Headers().Get("Access-Control-Allow-Origin"))
 
 	// 2. Normal Request
 	httpReq2, _ := http.NewRequest("GET", "/api/data", nil)
@@ -36,10 +35,9 @@ func TestCorsMiddleware_PreflightAndNormal(t *testing.T) {
 		return NewResponse().SetContent("data")
 	})
 
-	resp2, ok := res2.(*Response)
-	assert.True(t, ok)
+	resp2 := res2.(*Response)
 	assert.Equal(t, "data", resp2.GetContent())
-	assert.Equal(t, "*", resp2.Header.Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "*", resp2.Headers().Get("Access-Control-Allow-Origin"))
 
 	// Test backward compatible alias
 	aliasCors := NewCorsHandler()
@@ -74,7 +72,7 @@ func TestValidateSignatureMiddleware(t *testing.T) {
 	}).Name("secret.route")
 	r.Register()
 
-	generator := NewUrlGenerator(r).SetKeyResolver(func() []string {
+	generator := NewUrlGenerator(r, "").SetKeyResolver(func() []string {
 		return []string{"test-signature-key"}
 	})
 
@@ -88,8 +86,7 @@ func TestValidateSignatureMiddleware(t *testing.T) {
 	res := handler.Process(req, func(r *Request) interface{} {
 		return NewResponse().SetContent("passed")
 	})
-	resp, ok := res.(*Response)
-	assert.True(t, ok)
+	resp := res.(*Response)
 	assert.Equal(t, "passed", resp.GetContent())
 
 	// Invalid signature
@@ -98,8 +95,7 @@ func TestValidateSignatureMiddleware(t *testing.T) {
 	resBad := handler.Process(reqBad, func(r *Request) interface{} {
 		return NewResponse().SetContent("passed")
 	})
-	respBad, ok := resBad.(*Response)
-	assert.True(t, ok)
+	respBad := resBad.(*Response)
 	assert.Equal(t, http.StatusForbidden, respBad.GetCode())
 
 	// Test backward compatible alias
@@ -150,8 +146,7 @@ func TestRecoverMiddleware_PanicRecovery(t *testing.T) {
 	res1 := recHandlerDebug.Process(req1, func(r *Request) interface{} {
 		panic("database connection lost")
 	})
-	resp1, ok := res1.(*Response)
-	assert.True(t, ok)
+	resp1 := res1.(*Response)
 	assert.Equal(t, 500, resp1.GetCode())
 	assert.Contains(t, resp1.GetContent(), "database connection lost")
 
@@ -161,8 +156,7 @@ func TestRecoverMiddleware_PanicRecovery(t *testing.T) {
 	res2 := recHandlerProd.Process(req2, func(r *Request) interface{} {
 		panic("sensitive internal pointer nil")
 	})
-	resp2, ok := res2.(*Response)
-	assert.True(t, ok)
+	resp2 := res2.(*Response)
 	assert.Equal(t, 500, resp2.GetCode())
 	assert.Equal(t, "Internal Server Error", resp2.GetContent())
 
@@ -189,10 +183,9 @@ func TestCorsHandler_CustomOrigins(t *testing.T) {
 	res1 := cors.Process(req1, func(r *Request) interface{} {
 		return NewResponse().SetContent("user")
 	})
-	resp1, ok := res1.(*Response)
-	assert.True(t, ok)
-	assert.Equal(t, "https://app.example.com", resp1.Header.Get("Access-Control-Allow-Origin"))
-	assert.Equal(t, "true", resp1.Header.Get("Access-Control-Allow-Credentials"))
+	resp1 := res1.(*Response)
+	assert.Equal(t, "https://app.example.com", resp1.Headers().Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "true", resp1.Headers().Get("Access-Control-Allow-Credentials"))
 
 	// 2. Disallowed origin
 	httpReq2, _ := http.NewRequest("GET", "/api/user", nil)
@@ -201,9 +194,8 @@ func TestCorsHandler_CustomOrigins(t *testing.T) {
 	res2 := cors.Process(req2, func(r *Request) interface{} {
 		return NewResponse().SetContent("user")
 	})
-	resp2, ok := res2.(*Response)
-	assert.True(t, ok)
-	assert.Empty(t, resp2.Header.Get("Access-Control-Allow-Origin"))
+	resp2 := res2.(*Response)
+	assert.Empty(t, resp2.Headers().Get("Access-Control-Allow-Origin"))
 }
 
 func TestPipeline_ThroughAndHandlerFunc(t *testing.T) {
@@ -223,8 +215,7 @@ func TestPipeline_ThroughAndHandlerFunc(t *testing.T) {
 
 	req := NewRequest(nil)
 	res := p.Send(req).Then(nil)
-	resp, ok := res.(*Response)
-	assert.True(t, ok)
+	resp := res.(*Response)
 	assert.Equal(t, "done", resp.GetContent())
 
 	s1, _ := req.Get("step1")
@@ -245,8 +236,7 @@ func TestSessionMiddleware_ProcessFlow(t *testing.T) {
 		return NewResponse().SetContent("profile_ok")
 	})
 
-	resp, ok := res.(*Response)
-	assert.True(t, ok)
+	resp := res.(*Response)
 	assert.Equal(t, "profile_ok", resp.GetContent())
 
 	rec := httptest.NewRecorder()
@@ -324,8 +314,7 @@ func TestCookieMiddleware(t *testing.T) {
 		return resp
 	})
 
-	resp, ok := res.(*Response)
-	assert.True(t, ok)
+	resp := res.(*Response)
 	assert.NotNil(t, resp.CookieHandler)
 	assert.Equal(t, "example.com", resp.CookieHandler.Config.Domain)
 	assert.Equal(t, true, resp.CookieHandler.Config.Secure)

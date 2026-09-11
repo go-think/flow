@@ -12,7 +12,7 @@ import (
 func TestUrlGeneratorSigningAndRotation(t *testing.T) {
 	r := New()
 	keys := []string{"key-a"}
-	ug := NewUrlGenerator(r) // created before any route exists
+	ug := NewUrlGenerator(r, "") // created before any route exists
 	ug.SetKeyResolver(func() []string { return keys })
 
 	r.Get("/download/{file}", func(file string) string {
@@ -64,7 +64,7 @@ func TestUrlGeneratorFailsClosedWithoutKeys(t *testing.T) {
 	r.Register()
 
 	// No resolver at all.
-	ug := NewUrlGenerator(r)
+	ug := NewUrlGenerator(r, "")
 	assert.Empty(t, ug.SignedRoute("file.download", nil, time.Hour))
 
 	// Resolver returning empty/blank strings.
@@ -85,7 +85,7 @@ func TestUrlGeneratorResolvesGroupRouterToRoot(t *testing.T) {
 	r.Register()
 
 	// Generator built from the group router still sees root's named routes.
-	ug := NewUrlGenerator(admin).SetKeyResolver(func() []string { return []string{"k"} })
+	ug := NewUrlGenerator(admin, "").SetKeyResolver(func() []string { return []string{"k"} })
 	signed := ug.SignedRoute("admin.report", map[string]string{"id": "7"}, time.Hour)
 	assert.Contains(t, signed, "/admin/report/7?")
 
@@ -96,7 +96,7 @@ func TestUrlGeneratorResolvesGroupRouterToRoot(t *testing.T) {
 func TestUrlGeneratorMissingRoute(t *testing.T) {
 	r := New()
 	r.Register()
-	ug := NewUrlGenerator(r).SetKeyResolver(func() []string { return []string{"k"} })
+	ug := NewUrlGenerator(r, "").SetKeyResolver(func() []string { return []string{"k"} })
 
 	// Missing route -> RouteNotFoundError, and signed variants fail closed.
 	url, err := ug.Route("missing.route", nil)
@@ -126,7 +126,7 @@ func TestUrlGeneratorMissingRoute(t *testing.T) {
 func TestSignedRouteWithoutExpiry(t *testing.T) {
 	r := New()
 	keys := []string{"key-a"}
-	ug := NewUrlGenerator(r).SetKeyResolver(func() []string { return keys })
+	ug := NewUrlGenerator(r, "").SetKeyResolver(func() []string { return keys })
 	r.Get("/download/{file}", func(file string) string { return "x" }).Name("file.download")
 	r.Register()
 
@@ -150,7 +150,7 @@ func TestSignedRouteWithoutExpiry(t *testing.T) {
 }
 
 func TestNewUrlGeneratorRejectsNilSource(t *testing.T) {
-	assert.Panics(t, func() { NewUrlGenerator(nil) })
+	assert.Panics(t, func() { NewUrlGenerator(nil, "") })
 }
 
 // fakeRouteSource is a minimal NamedRouteSource independent of the built-in
@@ -167,7 +167,7 @@ func (f fakeRouteSource) NamedRoutePattern(name string) (string, bool) {
 func TestUrlGeneratorWorksWithAnyNamedRouteSource(t *testing.T) {
 	ug := NewUrlGenerator(fakeRouteSource{
 		patterns: map[string]string{"file.download": "/download/{file}"},
-	}).SetKeyResolver(func() []string { return []string{"key-a"} })
+	}, "").SetKeyResolver(func() []string { return []string{"key-a"} })
 
 	signed := ug.SignedRoute("file.download", map[string]string{"file": "report.pdf"}, time.Hour)
 	assert.Contains(t, signed, "/download/report.pdf?expires=")
@@ -178,7 +178,7 @@ func TestUrlGeneratorWorksWithAnyNamedRouteSource(t *testing.T) {
 
 func TestRouteParameterExpansion(t *testing.T) {
 	r := New()
-	ug := NewUrlGenerator(r).SetKeyResolver(func() []string { return []string{"k"} })
+	ug := NewUrlGenerator(r, "").SetKeyResolver(func() []string { return []string{"k"} })
 	r.Get("/download/{file}", func(file string) string { return "x" }).Name("file.download")
 	r.Get("/profile/{tab?}", func(tab string) string { return tab }).Name("profile.tab")
 	r.Register()
@@ -222,7 +222,7 @@ func TestRouteParameterExpansion(t *testing.T) {
 
 func TestHasValidSignatureWhileIgnoring(t *testing.T) {
 	r := New()
-	ug := NewUrlGenerator(r).SetKeyResolver(func() []string { return []string{"key-a"} })
+	ug := NewUrlGenerator(r, "").SetKeyResolver(func() []string { return []string{"key-a"} })
 	r.Get("/download", func() string { return "x" }).Name("file.download")
 	r.Register()
 

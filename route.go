@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,14 +47,18 @@ type Route struct {
 	metadata          map[string]any
 	fallback          bool
 	secure            bool
+	httpOnly          bool
 	domain            string
 	scopedBindings    bool
 	withTrashed       bool
+	missing           func(request *Request, err error) any
 
 	router *router // back reference for resolver/registry lookups
 
-	expanded    []*compiledPattern
-	compileOnce sync.Once
+	expanded           []*compiledPattern
+	compiledHostRegex  *regexp.Regexp
+	hostParameterNames []string
+	compileOnce        sync.Once
 }
 
 // compiledPattern is one matchable variant of the route URI. Routes with
@@ -72,6 +77,46 @@ func (r *Route) Methods() []string {
 // URI returns the raw path pattern of the route (e.g. "/users/{id}").
 func (r *Route) URI() string {
 	return r.uri
+}
+
+// Uri is the Laravel-style spelling of URI.
+func (r *Route) Uri() string {
+	return r.uri
+}
+
+// ActionName returns the canonical action identifier of the route: dot form
+// for controller actions ("Name.Method") and the cleaned runtime name for
+// bound method values ("Type.Method").
+func (r *Route) ActionName() string {
+	if ca, ok := r.handler.(ControllerAction); ok {
+		if name, isName := ca.Controller.(string); isName {
+			return name + "." + ca.Method
+		}
+		return fmt.Sprintf("%T.%s", ca.Controller, ca.Method)
+	}
+	if reflect.ValueOf(r.handler).Kind() == reflect.Func {
+		return normalizeActionName(runtime.FuncForPC(reflect.ValueOf(r.handler).Pointer()).Name())
+	}
+	return ""
+}
+
+// normalizeActionName converts a runtime function name into the public action
+// form: "pkg.(*Type).Method-fm" -> "Type.Method".
+func normalizeActionName(name string) string {
+	name = strings.TrimSuffix(name, "-fm")
+	if idx := strings.Index(name, ")."); idx != -1 {
+		left := name[:idx]
+		if dot := strings.LastIndex(left, "."); dot != -1 {
+			left = left[dot+1:]
+		}
+		left = strings.TrimPrefix(left, "(*")
+		return left + "." + name[idx+2:]
+	}
+	parts := strings.Split(name, ".")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2] + "." + parts[len(parts)-1]
+	}
+	return name
 }
 
 // Name returns the route name.
@@ -102,6 +147,55 @@ func (r *Route) SetWhere(name, expression string) *Route {
 	}
 	r.wheres[name] = expression
 	return r
+}
+
+// WhereNumber adds a numeric regex constraint to parameters.
+func (r *Route) WhereNumber(names ...string) *Route {
+	for _, name := range names {
+		r.SetWhere(name, "^[0-9]+$")
+	}
+	return r
+}
+
+// WhereAlpha adds an alphabetic regex constraint to parameters.
+func (r *Route) WhereAlpha(names ...string) *Route {
+	for _, name := range names {
+		r.SetWhere(name, "^[a-zA-Z]+$")
+	}
+	return r
+}
+
+// WhereAlphaNumeric adds an alphanumeric regex constraint to parameters.
+func (r *Route) WhereAlphaNumeric(names ...string) *Route {
+	for _, name := range names {
+		r.SetWhere(name, "^[a-zA-Z0-9]+$")
+	}
+	return r
+}
+
+// WhereUuid adds a UUID regex constraint to parameters.
+func (r *Route) WhereUuid(names ...string) *Route {
+	for _, name := range names {
+		r.SetWhere(name, `^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	}
+	return r
+}
+
+// WhereUlid adds a ULID regex constraint to parameters.
+func (r *Route) WhereUlid(names ...string) *Route {
+	for _, name := range names {
+		r.SetWhere(name, `^[0-7][0-9A-HJKMNP-TV-Z]{25}$`)
+	}
+	return r
+}
+
+// WhereIn adds an allowed values constraint to a parameter.
+func (r *Route) WhereIn(name string, allowed []string) *Route {
+	escaped := make([]string, len(allowed))
+	for i, val := range allowed {
+		escaped[i] = regexpQuote(val)
+	}
+	return r.SetWhere(name, "^("+strings.Join(escaped, "|")+")$")
 }
 
 // Defaults returns the route parameter defaults.
@@ -146,6 +240,7 @@ func (r *Route) IsFallback() bool {
 // Secure marks the route as requiring an HTTPS request.
 func (r *Route) Secure() *Route {
 	r.secure = true
+	r.httpOnly = false
 	return r
 }
 
@@ -154,7 +249,30 @@ func (r *Route) IsSecure() bool {
 	return r.secure
 }
 
-// SetDomain restricts the route to a request host (e.g. "api.example.com").
+// HttpOnly marks the route as requiring an HTTP (non-secure) request.
+func (r *Route) HttpOnly() *Route {
+	r.httpOnly = true
+	r.secure = false
+	return r
+}
+
+// IsHttpOnly reports whether the route requires standard HTTP.
+func (r *Route) IsHttpOnly() bool {
+	return r.httpOnly
+}
+
+// Missing sets the callback to run when a route binding cannot be resolved.
+func (r *Route) Missing(callback func(request *Request, err error) any) *Route {
+	r.missing = callback
+	return r
+}
+
+// GetMissing returns the missing binding callback, if configured.
+func (r *Route) GetMissing() func(request *Request, err error) any {
+	return r.missing
+}
+
+// SetDomain restricts the route to a request host (e.g. "api.example.com" or "{account}.example.com").
 func (r *Route) SetDomain(domain string) *Route {
 	r.domain = domain
 	return r
@@ -385,6 +503,24 @@ func (r *Route) ParameterNames() []string {
 // compile expands the URI into its matchable variants and builds their regexes.
 func (r *Route) compile() {
 	r.compileOnce.Do(func() {
+		// 1. Compile host regex if domain contains parameters (e.g. "{account}.myapp.com")
+		if r.domain != "" && strings.Contains(r.domain, "{") {
+			domainPat := regexp.QuoteMeta(r.domain)
+			regParam := regexp.MustCompile(`\\\{(\w+)\\\}`)
+			r.hostParameterNames = nil
+			hostRegexStr := regParam.ReplaceAllStringFunc(domainPat, func(m string) string {
+				paramName := m[2 : len(m)-2]
+				r.hostParameterNames = append(r.hostParameterNames, paramName)
+				if r.wheres != nil {
+					if constraint, ok := r.wheres[paramName]; ok {
+						return "(" + constraint + ")"
+					}
+				}
+				return `([^.]+)`
+			})
+			r.compiledHostRegex = regexp.MustCompile("(?i)^" + hostRegexStr + "$")
+		}
+
 		for _, pattern := range expandOptionalPatterns(r.uri) {
 			variant := &compiledPattern{pattern: pattern}
 			variant.parameterNames = compileParameterNames(pattern)
@@ -434,6 +570,7 @@ func (r *Route) parseParams(value reflect.Value, request *Request, parameters []
 	in := make([]reflect.Value, 0, needNum)
 	paramIdx := 0
 	resolver := r.getParameterResolver()
+	var lastBoundModel any
 
 	for i := 0; i < needNum; i++ {
 		t := valueType.In(i)
@@ -448,6 +585,12 @@ func (r *Route) parseParams(value reflect.Value, request *Request, parameters []
 			continue
 		} else if reqType != nil && t == reqType.Elem() {
 			in = append(in, reflect.ValueOf(request).Elem())
+			continue
+		}
+
+		// Context injection for the Context-based handler signature.
+		if t == contextType {
+			in = append(in, reflect.ValueOf(newContext(request)))
 			continue
 		}
 
@@ -469,11 +612,12 @@ func (r *Route) parseParams(value reflect.Value, request *Request, parameters []
 				if binder := r.router.getBinder(p.name); binder != nil {
 					val, err := binder(p.value, r)
 					if err != nil {
-						panic(fmt.Sprintf("flow: binding for parameter [%s] failed: %v", p.name, err))
+						panic(&ModelNotFoundError{Param: p.name, Value: p.value, Err: err})
 					}
 					if val != nil {
 						if v := reflect.ValueOf(val); v.Type().AssignableTo(t) {
 							paramIdx++
+							lastBoundModel = val
 							in = append(in, v)
 							continue
 						}
@@ -481,9 +625,16 @@ func (r *Route) parseParams(value reflect.Value, request *Request, parameters []
 				}
 			}
 
-			// 2. Implicit binding through the Routable contract.
-			if v, ok := implicitBindingArgument(t, p.value, r.bindingFieldFor(p.name), r); ok {
+			// 2. Implicit binding through the Routable contract (supports scoped parent chaining).
+			if v, err := implicitBindingArgument(t, p.name, p.value, r.bindingFieldFor(p.name), r, lastBoundModel, request.Context()); err != nil {
+
+				if modelErr, ok := err.(*ModelNotFoundError); ok && modelErr.Param == "" {
+					modelErr.Param = p.name
+				}
+				panic(err)
+			} else if v.IsValid() {
 				paramIdx++
+				lastBoundModel = v.Interface()
 				in = append(in, v)
 				continue
 			}

@@ -17,6 +17,10 @@ import (
 type Router interface {
 	// Add registers a new route.
 	Add(method []string, pattern string, handler interface{}) Router
+	// Match registers a route responding to the specified HTTP verbs.
+	Match(methods []string, pattern string, handler interface{}) Router
+	// View registers a route that renders a view.
+	View(pattern, viewName string, data ...any) Router
 	// Get registers a GET route.
 	Get(pattern string, handler interface{}) Router
 	// Post registers a POST route.
@@ -35,17 +39,28 @@ type Router interface {
 	Head(pattern string, handler interface{}) Router
 	// Static registers static file serving under the given path prefix.
 	Static(path, root string)
-	// Group creates a route group whose attributes (prefix, name, middleware,
-	// where) are merged into every route registered inside the callback.
-	Group(attrs GroupAttributes, callback func(group Router))
+	// Group creates a route group; the first argument, when present, is a
+	// GroupAttributes value whose prefix, name, controller namespace,
+	// middleware, where constraints, domain and metadata are merged into
+	// every route registered inside the callback.
+	Group(args ...any)
 	// Prefix adds a prefix to the current route group.
 	Prefix(prefix string) Router
+	// Domain restricts routes to a specific host pattern (supports dynamic {param} subdomains).
+	Domain(domain string) Router
 	// Middleware adds middleware to the current route or group.
 	Middleware(middlewares ...interface{}) Router
 	// WithoutMiddleware excludes middlewares from the current route or group.
 	WithoutMiddleware(middlewares ...interface{}) Router
-	// Dispatch resolves the request to a handler and executes it.
-	Dispatch(request *Request) interface{}
+	// Missing registers a fallback invoked when a bound parameter of the
+	// route cannot be resolved (defaults to a 404 response). Accepts
+	// func(Context) Response or func(*Request, error) any.
+	Missing(callback any) Router
+	// Dispatch resolves the request (flow *Request or raw *http.Request) to a
+	// handler and executes it, returning the response.
+	Dispatch(request any) *Response
+	// Routes exposes the route collection.
+	Routes() *RouteCollection
 	// Name names the route.
 	Name(name string) Router
 	// Url generates a URL for a named route.
@@ -62,19 +77,37 @@ type Router interface {
 	WhereNumber(names ...string) Router
 	// WhereAlpha adds an alphabetic regex constraint to parameters.
 	WhereAlpha(names ...string) Router
+	// WhereAlphaNumeric adds an alphanumeric regex constraint to parameters.
+	WhereAlphaNumeric(names ...string) Router
+	// WhereUuid adds a UUID regex constraint to parameters.
+	WhereUuid(names ...string) Router
+	// WhereUlid adds a ULID regex constraint to parameters.
+	WhereUlid(names ...string) Router
 	// WhereIn adds an allowed values constraint to a parameter.
 	WhereIn(name string, allowed []string) Router
+	// Pattern sets a global regex pattern for a parameter.
+	Pattern(name string, expression string)
 	// Has determines if the route collection contains a given named route.
 	Has(name string) bool
 	// Bind registers an explicit binder for a route parameter name.
 	Bind(key string, binder Binder)
 	// Resource registers a resource controller with the conventional seven
 	// actions; the returned builder defers registration for customization.
-	Resource(name, controller string) *PendingResourceRegistration
+	Resource(name string, controller any) *PendingResourceRegistration
+	// Resources bulk registers resource controllers.
+	Resources(resources map[string]any)
 	// APIResource registers a resource without Create/Edit actions.
-	APIResource(name, controller string) *PendingResourceRegistration
+	APIResource(name string, controller any) *PendingResourceRegistration
+	// APIResources bulk registers API resource controllers.
+	APIResources(resources map[string]any)
 	// Singleton registers a singleton resource (no id parameter).
-	Singleton(name, controller string) *PendingResourceRegistration
+	Singleton(name string, controller any) *PendingResourceRegistration
+	// Singletons bulk registers singleton resource controllers.
+	Singletons(singletons map[string]any)
+	// APISingleton registers an API singleton resource.
+	APISingleton(name string, controller any) *PendingResourceRegistration
+	// APISingletons bulk registers API singleton resource controllers.
+	APISingletons(singletons map[string]any)
 	// CurrentRouteName returns the current route name for the request.
 	CurrentRouteName(req *Request) string
 	// Is determines if the current route's name matches given patterns.
@@ -154,6 +187,7 @@ type Router interface {
 type GroupAttributes struct {
 	Prefix     string
 	Name       string
+	Domain     string
 	Controller string // namespace prefix applied to string controller actions
 	Middleware []interface{}
 	Wheres     map[string]string
@@ -207,6 +241,10 @@ type router struct {
 	binders            map[string]Binder
 	pending            []*PendingResourceRegistration
 	registered         bool
+	autoRegister       bool
+	scopedBindings     bool
+	withTrashed        bool
+	missing            func(request *Request, err error) any
 
 	collects []*router
 
@@ -245,13 +283,23 @@ func New(opts ...Option) Router {
 // Dispatch resolves the request to a route and executes it. A miss falls back
 // to the fallback route (when registered) or a 404 response; a verb mismatch
 // produces a 405 response with an Allow header.
-func (r *router) Dispatch(request *Request) interface{} {
-	r.currentRequest = request
+func (r *router) Dispatch(request any) *Response {
+	r.flushPending()
+	var req *Request
+	switch v := request.(type) {
+	case *Request:
+		req = v
+	case *http.Request:
+		req = NewRequest(v)
+	default:
+		return NotFoundResponse()
+	}
+	r.currentRequest = req
 	for _, fn := range r.onRouting {
-		fn(request)
+		fn(req)
 	}
 
-	route, params, err := r.findRoute(request)
+	route, params, err := r.findRoute(req)
 	if err != nil {
 		// The fallback route matches any path and verb, so it takes
 		// priority over a 405.
@@ -264,18 +312,18 @@ func (r *router) Dispatch(request *Request) interface{} {
 				fallback: true,
 				router:   r,
 			}
-			return r.runRoute(request, fallbackRoute, nil)
+			return r.runRoute(req, fallbackRoute, params)
 		}
 		var notAllowed *MethodNotAllowedError
 		if errors.As(err, &notAllowed) {
 			res := NewResponse().SetCode(http.StatusMethodNotAllowed)
-			res.Header.Set("Allow", strings.Join(notAllowed.Allowed, ", "))
+			res.Header("Allow", strings.Join(notAllowed.Allowed, ", "))
 			return res
 		}
 		return NotFoundResponse()
 	}
 
-	return r.runRoute(request, route, params)
+	return r.runRoute(req, route, params)
 }
 
 // findRoute resolves the request to a Route entity, records it as the
@@ -297,18 +345,37 @@ func (r *router) findRoute(request *Request) (*Route, []*parameter, error) {
 
 // runRoute fires the matched callbacks and runs the route within its
 // middleware stack.
-func (r *router) runRoute(request *Request, route *Route, params []*parameter) interface{} {
+func (r *router) runRoute(request *Request, route *Route, params []*parameter) (result *Response) {
 	for _, fn := range r.onRouteMatched {
 		fn(route, request)
 	}
 
-	var result any
+	defer func() {
+		if rec := recover(); rec != nil {
+			if modelErr, ok := rec.(*ModelNotFoundError); ok {
+				if route != nil && route.GetMissing() != nil {
+					result = r.prepareResponse(request, route.GetMissing()(request, modelErr))
+					return
+				}
+				result = NotFoundResponse()
+				return
+			}
+			panic(rec)
+		}
+	}()
+
 	if r.disableMiddleware {
-		result = route.Run(request, params)
-	} else {
-		result = r.runRouteWithinStack(route, request, params)
+		return r.prepareResponse(request, route.Run(request, params))
 	}
-	return r.prepareResponse(request, result)
+
+	out := r.runRouteWithinStack(route, request, params)
+	// The pipeline destination already prepared the response (middlewares
+	// observe a *Response on the way out); avoid re-preparing and firing the
+	// response events twice.
+	if res, ok := out.(*Response); ok {
+		return res
+	}
+	return r.prepareResponse(request, out)
 }
 
 // runRouteWithinStack gathers the route middleware (resolved, sorted,
@@ -326,7 +393,20 @@ func (r *router) runRouteWithinStack(route *Route, request *Request, params []*p
 	}
 	request.SetRouteMiddlewares(applied)
 
-	return pipeline.Send(request).Then(func(req *Request) any {
+	return pipeline.Send(request).Then(func(req *Request) (res any) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				if modelErr, ok := rec.(*ModelNotFoundError); ok {
+					if route != nil && route.GetMissing() != nil {
+						res = r.prepareResponse(req, route.GetMissing()(req, modelErr))
+						return
+					}
+					res = NotFoundResponse()
+					return
+				}
+				panic(rec)
+			}
+		}()
 		return r.prepareResponse(req, route.Run(req, params))
 	})
 }
@@ -337,7 +417,7 @@ func (r *router) runRouteWithinStack(route *Route, request *Request, params []*p
 func (r *router) gatherRouteMiddleware(route *Route) []Middleware {
 	var raw []any
 	for _, m := range route.GatherMiddleware() {
-		if isExcludedMiddleware(m, route.ExcludedMiddleware()) {
+		if isExcludedMiddleware(m, route.ExcludedMiddleware(), r) {
 			continue
 		}
 		raw = append(raw, m)
@@ -352,14 +432,21 @@ func (r *router) gatherRouteMiddleware(route *Route) []Middleware {
 }
 
 // isExcludedMiddleware reports whether the raw entry matches one of the
-// exclusions (by value equality or deep equality).
-func isExcludedMiddleware(m interface{}, excluded []interface{}) bool {
+// exclusions (by value equality, deep equality, or group alias membership).
+func isExcludedMiddleware(m interface{}, excluded []interface{}, r *router) bool {
 	for _, e := range excluded {
-		if m == e {
+		if m == e || reflect.DeepEqual(m, e) {
 			return true
 		}
-		if reflect.DeepEqual(m, e) {
-			return true
+		// If e is a string, check if it is a middleware group that contains m
+		if name, ok := e.(string); ok && r != nil {
+			if group := r.GetMiddlewareGroup(name); group != nil {
+				for _, gm := range group {
+					if m == gm || reflect.DeepEqual(m, gm) {
+						return true
+					}
+				}
+			}
 		}
 	}
 	return false
@@ -393,8 +480,14 @@ func sortMiddlewareRaw(raw []any, priority []any) []any {
 }
 
 // Add registers a new route. The pattern is stored raw; group prefixes are
-// applied once at Register time.
+// merged at registration time (Register in deferred mode, immediately in
+// immediate mode).
 func (r *router) Add(method []string, pattern string, handler interface{}) Router {
+	if r.autoRegister {
+		entity := r.buildRouteEntity(method, pattern, handler)
+		r.collection.Add(entity)
+		return r.routeChainFor(entity)
+	}
 	route := r.initRoute()
 	route.method = method
 	route.pattern = pattern
@@ -460,6 +553,26 @@ func (r *router) Statics(statics map[string]string) {
 	}
 }
 
+// Match registers a route responding to the specified HTTP verbs.
+func (r *router) Match(methods []string, pattern string, handler interface{}) Router {
+	return r.Add(Method(methods...), pattern, handler)
+}
+
+// View registers a route that renders a view.
+func (r *router) View(pattern, viewName string, data ...any) Router {
+	return r.Get(pattern, func() *Response {
+		var viewData any
+		if len(data) > 0 {
+			viewData = data[0]
+		}
+		// Render view or fallback to formatted JSON/content
+		return NewResponse().SetContent(FormatContent(map[string]any{
+			"view": viewName,
+			"data": viewData,
+		}))
+	})
+}
+
 // Prefix adds a prefix to the current route group.
 func (r *router) Prefix(prefix string) Router {
 	route := r.initRoute()
@@ -467,15 +580,38 @@ func (r *router) Prefix(prefix string) Router {
 	return route
 }
 
+// Domain restricts routes to a specific host pattern (supports dynamic {param} subdomains).
+func (r *router) Domain(domain string) Router {
+	route := r.initRoute()
+	route.domain = domain
+	return route
+}
+
 // Group creates a route group whose attributes are merged into the routes
 // registered inside the callback: prefixes concatenate (outer first), the
 // group name prefixes route names, middleware entries are appended and where
 // constraints are merged.
-func (r *router) Group(attrs GroupAttributes, callback func(group Router)) {
+func (r *router) Group(args ...any) {
+	var attrs GroupAttributes
+	var callback func(group Router)
+	for _, arg := range args {
+		switch v := arg.(type) {
+		case GroupAttributes:
+			attrs = v
+		case func(group Router):
+			callback = v
+		}
+	}
+	if callback == nil {
+		panic("flow: Group requires a callback func(group Router)")
+	}
 	node := r.cloneRoute()
 	node.prefix = attrs.Prefix
 	node.controllerPrefix = attrs.Controller
 	node.name = node.name + attrs.Name
+	if attrs.Domain != "" {
+		node.domain = attrs.Domain
+	}
 	for k, v := range attrs.Wheres {
 		if node.groupWheres == nil {
 			node.groupWheres = make(map[string]string)
@@ -504,6 +640,41 @@ func (r *router) WithoutMiddleware(middlewares ...interface{}) Router {
 	route := r.initRoute()
 	route.withoutMiddleware = append(route.withoutMiddleware, middlewares...)
 	return route
+}
+
+// Missing registers a fallback invoked when a bound parameter of the route
+// cannot be resolved.
+func (r *router) Missing(callback any) Router {
+	route := r.initRoute()
+	route.Missing(normalizeMissingCallback(callback))
+	return route
+}
+
+// normalizeMissingCallback adapts the supported missing-handler signatures.
+func normalizeMissingCallback(callback any) func(request *Request, err error) any {
+	if callback == nil {
+		return nil
+	}
+	switch v := callback.(type) {
+	case func(*Request, error) any:
+		return v
+	case func(Context) Response:
+		return func(request *Request, err error) any {
+			return v(newContext(request))
+		}
+	}
+	val := reflect.ValueOf(callback)
+	t := val.Type()
+	if val.Kind() == reflect.Func && t.NumIn() == 1 && t.In(0) == reflect.TypeOf(Context{}) && t.NumOut() >= 1 {
+		return func(request *Request, err error) any {
+			out := val.Call([]reflect.Value{reflect.ValueOf(newContext(request))})
+			if len(out) > 0 {
+				return out[0].Interface()
+			}
+			return nil
+		}
+	}
+	return nil
 }
 
 // Name names the route (prefixed by the enclosing group name, if any).
@@ -581,6 +752,30 @@ func (r *router) WhereAlpha(names ...string) Router {
 	return r
 }
 
+// WhereAlphaNumeric adds an alphanumeric regex constraint to parameters.
+func (r *router) WhereAlphaNumeric(names ...string) Router {
+	for _, name := range names {
+		r.Where(name, "^[a-zA-Z0-9]+$")
+	}
+	return r
+}
+
+// WhereUuid adds a UUID regex constraint to parameters.
+func (r *router) WhereUuid(names ...string) Router {
+	for _, name := range names {
+		r.Where(name, `^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	}
+	return r
+}
+
+// WhereUlid adds a ULID regex constraint to parameters.
+func (r *router) WhereUlid(names ...string) Router {
+	for _, name := range names {
+		r.Where(name, `^[0-7][0-9A-HJKMNP-TV-Z]{25}$`)
+	}
+	return r
+}
+
 // WhereIn adds an allowed values constraint to a parameter.
 func (r *router) WhereIn(name string, allowed []string) Router {
 	escaped := make([]string, len(allowed))
@@ -612,6 +807,7 @@ func regexpQuote(s string) string {
 // Register expands the collected pending routes into Route entities inside
 // the route collection, after flushing any deferred resource registrations.
 func (r *router) Register() {
+	r.flushPending()
 	r.registered = true
 	for _, p := range r.pending {
 		p.register()
@@ -700,6 +896,9 @@ func (r *router) register(root *router) {
 			wheres:            combinedWheres,
 			metadata:          node.groupMetadata,
 			domain:            node.domain,
+			scopedBindings:    node.scopedBindings,
+			withTrashed:       node.withTrashed,
+			missing:           node.missing,
 			router:            root,
 		}
 
@@ -711,11 +910,20 @@ func (r *router) register(root *router) {
 // initRoute returns the node itself when already initialized as a pending
 // route, otherwise creates a child node attached to this one.
 func (r *router) initRoute() *router {
+	// In immediate mode the node is initialized in place: attribute calls
+	// (Prefix/Middleware/...) and the following verb registration share the
+	// same node, like a scoped registrar.
+	if r.autoRegister {
+		r.inited = true
+		return r
+	}
 	route := r
 	if !r.inited {
 		route = &router{
 			inited:             true,
+			autoRegister:       r.autoRegister,
 			name:               r.name,
+			domain:             r.domain,
 			controllerPrefix:   r.controllerPrefix,
 			group:              r,
 			parameterResolver:  r.parameterResolver,
@@ -723,6 +931,9 @@ func (r *router) initRoute() *router {
 			middlewareAliases:  r.middlewareAliases,
 			middlewareGroups:   r.middlewareGroups,
 			middlewarePriority: r.middlewarePriority,
+			scopedBindings:     r.scopedBindings,
+			withTrashed:        r.withTrashed,
+			missing:            r.missing,
 		}
 		if r.collection != nil {
 			route.collection = r.collection
@@ -736,7 +947,9 @@ func (r *router) initRoute() *router {
 func (r *router) cloneRoute() *router {
 	route := &router{
 		inited:             false,
+		autoRegister:       r.autoRegister,
 		name:               r.name,
+		domain:             r.domain,
 		controllerPrefix:   r.controllerPrefix,
 		group:              r,
 		parameterResolver:  r.parameterResolver,
@@ -744,6 +957,9 @@ func (r *router) cloneRoute() *router {
 		middlewareAliases:  r.middlewareAliases,
 		middlewareGroups:   r.middlewareGroups,
 		middlewarePriority: r.middlewarePriority,
+		scopedBindings:     r.scopedBindings,
+		withTrashed:        r.withTrashed,
+		missing:            r.missing,
 	}
 	if r.collection != nil {
 		route.collection = r.collection
@@ -900,6 +1116,7 @@ func (r *router) legacyUrlGenerator() *UrlGenerator {
 
 // Has determines if the route collection contains a given named route.
 func (r *router) Has(name string) bool {
+	r.flushPending()
 	return r.collection.HasNamedRoute(name)
 }
 
@@ -953,10 +1170,23 @@ func getSignatureKey() string {
 
 // NamedRoutePattern returns the raw pattern of a named route.
 func (r *router) NamedRoutePattern(name string) (string, bool) {
+	r.flushPending()
 	if r.collection == nil {
 		return "", false
 	}
-	route, ok := r.collection.GetByName(name)
+	route := r.collection.GetByName(name)
+	if route == nil {
+		return "", false
+	}
+	return route.URI(), true
+}
+
+// ActionRoutePattern returns the raw pattern of a route matching the action string.
+func (r *router) ActionRoutePattern(action string) (string, bool) {
+	if r.collection == nil {
+		return "", false
+	}
+	route, ok := r.collection.GetByAction(action)
 	if !ok {
 		return "", false
 	}
@@ -975,13 +1205,34 @@ func (r *router) CurrentRequest() *Request {
 
 // MatchRequest resolves a request to a Route entity and binds its parameters.
 func (r *router) MatchRequest(request *Request) (*Route, error) {
+	r.flushPending()
 	route, _, err := r.findRoute(request)
 	return route, err
 }
 
 // GetRoutes returns every registered route.
 func (r *router) GetRoutes() []*Route {
+	r.flushPending()
 	return r.collection.All()
+}
+
+// flushPending materializes deferred resource registrations.
+func (r *router) flushPending() {
+	root := r.root()
+	if len(root.pending) == 0 {
+		return
+	}
+	pending := root.pending
+	root.pending = nil
+	for _, p := range pending {
+		p.register()
+	}
+}
+
+// Routes exposes the route collection.
+func (r *router) Routes() *RouteCollection {
+	r.flushPending()
+	return r.collection
 }
 
 // OnRouting registers a callback fired before a request is matched.
@@ -1021,7 +1272,7 @@ func (r *router) RegisterController(name string, controller any) {
 
 // Resource registers a resource controller with the conventional seven
 // actions; the returned builder defers registration for customization.
-func (r *router) Resource(name, controller string) *PendingResourceRegistration {
+func (r *router) Resource(name string, controller any) *PendingResourceRegistration {
 	p := &PendingResourceRegistration{router: r, name: name, controller: controller}
 	r.root().pending = append(r.root().pending, p)
 	if r.root().registered {
@@ -1030,18 +1281,53 @@ func (r *router) Resource(name, controller string) *PendingResourceRegistration 
 	return p
 }
 
+// Resources bulk registers resource controllers.
+func (r *router) Resources(resources map[string]any) {
+	for name, controller := range resources {
+		r.Resource(name, controller)
+	}
+}
+
 // APIResource registers a resource without Create/Edit actions.
-func (r *router) APIResource(name, controller string) *PendingResourceRegistration {
+func (r *router) APIResource(name string, controller any) *PendingResourceRegistration {
 	p := r.Resource(name, controller)
 	p.options.Except = []string{"Create", "Edit"}
 	return p
 }
 
+// APIResources bulk registers API resource controllers.
+func (r *router) APIResources(resources map[string]any) {
+	for name, controller := range resources {
+		r.APIResource(name, controller)
+	}
+}
+
 // Singleton registers a singleton resource (no id parameter).
-func (r *router) Singleton(name, controller string) *PendingResourceRegistration {
+func (r *router) Singleton(name string, controller any) *PendingResourceRegistration {
 	p := r.Resource(name, controller)
 	p.singleton = true
 	return p
+}
+
+// Singletons bulk registers singleton resource controllers.
+func (r *router) Singletons(singletons map[string]any) {
+	for name, controller := range singletons {
+		r.Singleton(name, controller)
+	}
+}
+
+// APISingleton registers an API singleton resource.
+func (r *router) APISingleton(name string, controller any) *PendingResourceRegistration {
+	p := r.Singleton(name, controller)
+	p.options.Except = []string{"Edit"}
+	return p
+}
+
+// APISingletons bulk registers API singleton resource controllers.
+func (r *router) APISingletons(singletons map[string]any) {
+	for name, controller := range singletons {
+		r.APISingleton(name, controller)
+	}
 }
 
 // root walks up the group chain to the owning router.
@@ -1131,10 +1417,16 @@ func (r *router) prepareResponse(request *Request, result any) *Response {
 		fn(request, result)
 	}
 	var response *Response
-	if res, ok := result.(*Response); ok {
+	switch res := result.(type) {
+	case *Response:
 		response = res
-	} else {
-		response = NewResponse().SetContent(FormatContent(result))
+	case Response:
+		// A Context-built response value: its header map is shared with the
+		// request's canonical response.
+		response = &res
+	default:
+		response = request.CanonicalResponse()
+		response.SetContent(FormatContent(result))
 	}
 	for _, fn := range r.onResponsePrepared {
 		fn(request, response)
@@ -1170,6 +1462,10 @@ func resolveMiddleware(m interface{}, r *router) []Middleware {
 		Process(req *Request, next Closure) interface{}
 	}); ok {
 		resolved = append(resolved, handler.Process)
+	} else if items, ok := m.([]any); ok {
+		for _, item := range items {
+			resolved = append(resolved, resolveMiddleware(item, r)...)
+		}
 	} else if name, ok := m.(string); ok && r != nil {
 		var params []string
 		if idx := strings.Index(name, ":"); idx != -1 {
@@ -1231,14 +1527,58 @@ func resolveMiddleware(m interface{}, r *router) []Middleware {
 				return nil
 			})
 		} else if val.Kind() == reflect.Func && val.Type().NumIn() == 2 && val.Type().NumOut() >= 1 {
-			// A raw closure with the middleware signature.
-			resolved = append(resolved, func(req *Request, next Closure) interface{} {
-				res := val.Call([]reflect.Value{reflect.ValueOf(req), reflect.ValueOf(next)})
-				if len(res) > 0 {
-					return res[0].Interface()
+			// A raw closure with a middleware signature. Arguments are built
+			// dynamically: *Request, Context, and a next() function whose
+			// return type matches the declaration.
+			resolved = append(resolved, Middleware(func(req *Request, next Closure) interface{} {
+				t := val.Type()
+				args := make([]reflect.Value, t.NumIn())
+				for i := 0; i < t.NumIn(); i++ {
+					pt := t.In(i)
+					switch {
+					case pt == reflect.TypeOf(req):
+						args[i] = reflect.ValueOf(req)
+					case pt == contextType:
+						args[i] = reflect.ValueOf(newContext(req))
+					case pt.Kind() == reflect.Func:
+						outType := pt.Out(0)
+						args[i] = reflect.MakeFunc(pt, func(in []reflect.Value) []reflect.Value {
+							result := next(req)
+							res := r.prepareResponse(req, result)
+							switch {
+							case outType == reflect.TypeOf(res):
+								return []reflect.Value{reflect.ValueOf(res)}
+							case outType == reflect.TypeOf(Response{}):
+								return []reflect.Value{reflect.ValueOf(*res)}
+							case outType.Kind() == reflect.Interface:
+								if res != nil {
+									if v := reflect.ValueOf(res); v.Type().Implements(outType) {
+										return []reflect.Value{v}
+									}
+								}
+								if result != nil {
+									if v := reflect.ValueOf(result); v.Type().Implements(outType) {
+										return []reflect.Value{v}
+									}
+								}
+							}
+							if result != nil {
+								if v := reflect.ValueOf(result); v.Type().AssignableTo(outType) {
+									return []reflect.Value{v}
+								}
+							}
+							return []reflect.Value{reflect.Zero(outType)}
+						})
+					default:
+						args[i] = reflect.Zero(pt)
+					}
+				}
+				out := val.Call(args)
+				if len(out) > 0 {
+					return out[0].Interface()
 				}
 				return nil
-			})
+			}))
 		}
 	}
 	return resolved

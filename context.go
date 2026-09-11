@@ -46,6 +46,77 @@ type Request struct {
 	keys             map[string]interface{}
 	keysMu           sync.RWMutex
 	parseOnce        sync.Once
+	canonical        *Response
+}
+
+// CanonicalResponse returns the lazily-created response bound to this
+// request. The Context type and response-preparation share this instance so
+// header mutations from middlewares reach the final output.
+func (r *Request) CanonicalResponse() *Response {
+	if r.canonical == nil {
+		r.canonical = NewResponse()
+	}
+	return r.canonical
+}
+
+// Context is the request-scoped handle given to route actions: it wraps the
+// request, its route parameters and the canonical response.
+type Context struct {
+	*Request
+	response *Response
+}
+
+// contextType is the reflect type used for Context argument injection.
+var contextType = reflect.TypeOf(Context{})
+
+// newContext builds a Context bound to the request's canonical response.
+func newContext(request *Request) Context {
+	return Context{Request: request, response: request.CanonicalResponse()}
+}
+
+// Param returns a route parameter value for the current request.
+func (c Context) Param(name string) string {
+	return c.Request.GetRouteParam(name)
+}
+
+// Response returns the canonical response for the current request; header
+// mutations made through it reach the final output.
+func (c Context) Response() *Response {
+	return c.response
+}
+
+// String writes a plain-text response body with the given status code.
+func (c Context) String(code int, body string) Response {
+	res := c.response
+	res.SetCode(code).SetContent(body)
+	return *res
+}
+
+// Header sets a single response header.
+func (r *Response) Header(name, value string) *Response {
+	if r.headers == nil {
+		r.headers = make(http.Header)
+	}
+	r.headers.Set(name, value)
+	return r
+}
+
+// Headers returns the full response header map.
+func (r *Response) Headers() http.Header {
+	if r.headers == nil {
+		r.headers = make(http.Header)
+	}
+	return r.headers
+}
+
+// StatusCode returns the HTTP status code of the response.
+func (r *Response) StatusCode() int {
+	return r.code
+}
+
+// Body returns the response content.
+func (r *Response) Body() string {
+	return r.content
 }
 
 // ResponseWriter returns the native http.ResponseWriter associated with this request.
@@ -802,7 +873,7 @@ type Response struct {
 	Request       *Request
 	cookies       map[string]*http.Cookie
 	CookieHandler *Cookie
-	Header        *http.Header
+	headers       http.Header
 	streamFunc    func(w io.Writer) bool
 	handled       bool
 }
@@ -943,7 +1014,7 @@ func (r *Response) Send(w http.ResponseWriter) {
 	for _, cookie := range r.cookies {
 		http.SetCookie(w, cookie)
 	}
-	for key, value := range *r.Header {
+	for key, value := range r.headers {
 		for _, val := range value {
 			w.Header().Add(key, val)
 		}
@@ -986,7 +1057,7 @@ func (r *Response) Send(w http.ResponseWriter) {
 // NewResponse Create a new HTTP Response
 func NewResponse() *Response {
 	r := &Response{
-		Header: &http.Header{},
+		headers: make(http.Header),
 	}
 	r.SetCode(http.StatusOK)
 	r.SetContentType("text/html")
@@ -1010,8 +1081,8 @@ func DownloadResponse(filePath string, filename ...string) *Response {
 		name = filename[0]
 	}
 
-	r.Header.Set("Content-Disposition", "attachment; filename=\""+name+"\"")
-	r.Header.Set("Content-Type", "application/octet-stream")
+	r.Header("Content-Disposition", "attachment; filename=\""+name+"\"")
+	r.Header("Content-Type", "application/octet-stream")
 	return r
 }
 
@@ -1027,7 +1098,7 @@ func Redirect(to string, status ...int) *Response {
 		code = status[0]
 	}
 	r := NewResponse().SetCode(code)
-	r.Header.Set("Location", to)
+	r.Header("Location", to)
 	return r
 }
 
@@ -1041,8 +1112,8 @@ func (r *Response) SetStream(streamFunc func(w io.Writer) bool) *Response {
 func StreamResponse(streamFunc func(w io.Writer) bool) *Response {
 	r := NewResponse()
 	r.SetContentType("text/event-stream")
-	r.Header.Set("Cache-Control", "no-cache")
-	r.Header.Set("Connection", "keep-alive")
+	r.Header("Cache-Control", "no-cache")
+	r.Header("Connection", "keep-alive")
 	r.streamFunc = streamFunc
 	return r
 }
@@ -1050,8 +1121,8 @@ func StreamResponse(streamFunc func(w io.Writer) bool) *Response {
 // StreamDownload creates a new streaming download response.
 func StreamDownload(streamFunc func(w io.Writer) bool, filename string) *Response {
 	r := NewResponse()
-	r.Header.Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
-	r.Header.Set("Content-Type", "application/octet-stream")
+	r.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	r.Header("Content-Type", "application/octet-stream")
 	r.streamFunc = streamFunc
 	return r
 }

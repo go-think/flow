@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strings"
@@ -18,7 +19,36 @@ type Routable interface {
 	// field is the binding field when the route declared "{user:id}" syntax,
 	// or "" when the default key applies. Return an error when the entity is
 	// not found — the request then fails with a not-found response.
-	ResolveRouteBinding(value string, field string) (any, error)
+	ResolveRouteBinding(ctx context.Context, value string, field string) (any, error)
+}
+
+// ScopedRoutable is implemented by entities that can resolve a child entity (scoped binding).
+type ScopedRoutable interface {
+	ResolveChildRouteBinding(ctx context.Context, childType string, value string, field string) (any, error)
+}
+
+// SoftDeletableRoutable is implemented by entities that support resolving soft-deleted records.
+type SoftDeletableRoutable interface {
+	ResolveSoftDeletableRouteBinding(ctx context.Context, value string, field string) (any, error)
+}
+
+// ModelNotFoundError indicates that a bound model could not be found for a route parameter.
+type ModelNotFoundError struct {
+	Param string
+	Value string
+	Type  reflect.Type
+	Err   error
+}
+
+func (e *ModelNotFoundError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("flow: model not found for parameter [%s] with value [%s]: %v", e.Param, e.Value, e.Err)
+	}
+	return fmt.Sprintf("flow: model not found for parameter [%s] with value [%s]", e.Param, e.Value)
+}
+
+func (e *ModelNotFoundError) Unwrap() error {
+	return e.Err
 }
 
 // Bind registers an explicit binder for a route parameter name.
@@ -45,13 +75,13 @@ func (r *router) getBinder(key string) Binder {
 func (r *Route) resolveBindingParameters(request *Request, parameters []*parameter) map[string]any {
 	resolved := make(map[string]any)
 	for _, p := range parameters {
-		name, field := splitBindingFieldName(p.name)
+		name, _ := splitBindingFieldName(p.name)
 
 		if r.router != nil {
 			if binder := r.router.getBinder(name); binder != nil {
 				val, err := binder(p.value, r)
 				if err != nil {
-					panic(fmt.Sprintf("flow: binding for parameter [%s] failed: %v", name, err))
+					panic(&ModelNotFoundError{Param: name, Value: p.value, Err: err})
 				}
 				if val != nil {
 					resolved[name] = val
@@ -59,11 +89,6 @@ func (r *Route) resolveBindingParameters(request *Request, parameters []*paramet
 				}
 			}
 		}
-
-		// Implicit binding happens lazily during argument matching, when the
-		// target argument type is known.
-		_ = field
-		_ = request
 	}
 	return resolved
 }
@@ -86,25 +111,62 @@ func (r *Route) bindingFieldFor(name string) string {
 }
 
 // implicitBindingArgument builds the argument value for an implicit binding:
-// a zero instance of the target type resolves itself through Routable.
-func implicitBindingArgument(targetType reflect.Type, paramValue, field string, route *Route) (reflect.Value, bool) {
+// a zero instance of the target type resolves itself through Routable or ScopedRoutable.
+func implicitBindingArgument(targetType reflect.Type, paramName, paramValue, field string, route *Route, parent any, ctx context.Context) (reflect.Value, error) {
 	if targetType.Kind() != reflect.Ptr {
-		return reflect.Value{}, false
+		return reflect.Value{}, nil
 	}
-	probe, ok := reflect.New(targetType.Elem()).Interface().(Routable)
-	if !ok {
-		return reflect.Value{}, false
+
+	// 1. When a parent model was bound, attempt child resolution through it
+	// (implicit scoped chaining for nested resources).
+	if parent != nil {
+		if scopedParent, ok := parent.(ScopedRoutable); ok {
+			bound, err := scopedParent.ResolveChildRouteBinding(ctx, paramName, paramValue, field)
+			if err != nil {
+				return reflect.Value{}, &ModelNotFoundError{Value: paramValue, Type: targetType, Err: err}
+			}
+			if bound == nil {
+				return reflect.Value{}, &ModelNotFoundError{Value: paramValue, Type: targetType}
+			}
+			val := reflect.ValueOf(bound)
+			if val.Type().AssignableTo(targetType) {
+				return val, nil
+			}
+		}
 	}
-	bound, err := probe.ResolveRouteBinding(paramValue, field)
-	if err != nil {
-		panic(fmt.Sprintf("flow: implicit binding for [%s] failed: %v", targetType, err))
+
+	// 2. Normal Routable or SoftDeletableRoutable resolution
+	probe := reflect.New(targetType.Elem()).Interface()
+
+	if route != nil && route.AllowsTrashedBindings() {
+		if soft, ok := probe.(SoftDeletableRoutable); ok {
+			bound, err := soft.ResolveSoftDeletableRouteBinding(ctx, paramValue, field)
+			if err != nil {
+				return reflect.Value{}, &ModelNotFoundError{Value: paramValue, Type: targetType, Err: err}
+			}
+			if bound == nil {
+				return reflect.Value{}, &ModelNotFoundError{Value: paramValue, Type: targetType}
+			}
+			val := reflect.ValueOf(bound)
+			if val.Type().AssignableTo(targetType) {
+				return val, nil
+			}
+		}
 	}
-	if bound == nil {
-		return reflect.Value{}, false
+
+	if routable, ok := probe.(Routable); ok {
+		bound, err := routable.ResolveRouteBinding(ctx, paramValue, field)
+		if err != nil {
+			return reflect.Value{}, &ModelNotFoundError{Value: paramValue, Type: targetType, Err: err}
+		}
+		if bound == nil {
+			return reflect.Value{}, &ModelNotFoundError{Value: paramValue, Type: targetType}
+		}
+		val := reflect.ValueOf(bound)
+		if val.Type().AssignableTo(targetType) {
+			return val, nil
+		}
 	}
-	val := reflect.ValueOf(bound)
-	if !val.Type().AssignableTo(targetType) {
-		return reflect.Value{}, false
-	}
-	return val, true
+
+	return reflect.Value{}, nil
 }
