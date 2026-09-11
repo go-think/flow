@@ -20,7 +20,7 @@ var resourceVerbs = []resourceVerb{
 	{action: "Create", method: "GET", uri: "/create", hasParam: false},
 	{action: "Show", method: "GET", uri: "/%s", hasParam: true},
 	{action: "Edit", method: "GET", uri: "/%s/edit", hasParam: true},
-	{action: "Update", method: "PUT", uri: "/%s", hasParam: true},
+	{action: "Update", method: "PUT,PATCH", uri: "/%s", hasParam: true},
 	{action: "Destroy", method: "DELETE", uri: "/%s", hasParam: true},
 }
 
@@ -29,7 +29,7 @@ var resourceVerbs = []resourceVerb{
 var singletonResourceVerbs = []resourceVerb{
 	{action: "Show", method: "GET", uri: "", hasParam: false},
 	{action: "Edit", method: "GET", uri: "/edit", hasParam: false},
-	{action: "Update", method: "PUT", uri: "", hasParam: false},
+	{action: "Update", method: "PUT,PATCH", uri: "", hasParam: false},
 	{action: "Destroy", method: "DELETE", uri: "", hasParam: false},
 }
 
@@ -285,7 +285,7 @@ func (p *PendingResourceRegistration) register() {
 		} else {
 			action = ControllerAction{Controller: p.controller, Method: rv.action}
 		}
-		child := p.router.Add(Method(rv.method), routePath, action)
+		child := p.router.Add(Method(strings.Split(rv.method, ",")...), routePath, action)
 		child.Name(routeName)
 		child.Middleware(p.options.Middleware...)
 		if forAction, ok := p.options.MiddlewareFor[rv.action]; ok {

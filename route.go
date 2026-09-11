@@ -402,10 +402,17 @@ func (r *Route) Bind(req *Request, path string, treeParams ...[]*parameter) []*p
 				}
 			}
 			if !found {
-				p := &parameter{name: name, value: ""}
+				value := ""
+				// 默认值填充（对齐 Laravel replaceDefaults）。
+				if r.defaults != nil {
+					if d, ok := r.defaults[name]; ok {
+						value = fmt.Sprintf("%v", d)
+					}
+				}
+				p := &parameter{name: name, value: value}
 				parameters = append(parameters, p)
 				if req != nil {
-					req.SetRouteParam(name, "")
+					req.SetRouteParam(name, value)
 				}
 			}
 		}
@@ -487,6 +494,32 @@ func (r *Route) ValidateParams(params []*parameter) bool {
 		}
 	}
 	return true
+}
+
+// Parameter returns a decoded route parameter value for the request
+// (Laravel: Route::parameter($name)).
+func (r *Route) Parameter(request *Request, name string, defaultValue ...string) string {
+	if request == nil {
+		if len(defaultValue) > 0 {
+			return defaultValue[0]
+		}
+		return ""
+	}
+	return request.GetRouteParam(name, defaultValue...)
+}
+
+// Parameters returns all decoded route parameters of the request
+// (Laravel: Route::parameters()).
+func (r *Route) Parameters(request *Request) map[string]string {
+	out := make(map[string]string)
+	r.compile()
+	for _, variant := range r.expanded {
+		for _, name := range variant.parameterNames {
+			out[name] = request.GetRouteParam(name)
+		}
+		break
+	}
+	return out
 }
 
 // ParameterNames returns all parameter names declared in the route pattern.

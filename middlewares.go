@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"runtime"
@@ -263,6 +264,10 @@ func (h *TrimStringsMiddleware) isExcepted(key string) bool {
 // --- End trim.go ---
 
 // --- Begin validate_signature.go ---
+// ErrInvalidSignature 是签名校验失败的哨兵错误；中间件本身仍返回 403 响应，
+// 该哨兵供需要检测失败原因的调用方使用。
+var ErrInvalidSignature = errors.New("flow: invalid signature")
+
 type ValidateSignatureMiddleware struct {
 	generator *UrlGenerator
 }

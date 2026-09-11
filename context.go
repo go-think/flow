@@ -1161,6 +1161,49 @@ func Download(filePath string, filename ...string) *Response {
 }
 
 // MakeResponse Create a new HTTP Response by auto detecting content type
+// Jsonp creates a JSONP response with the given callback name.
+func Jsonp(callback string, v interface{}) *Response {
+	body, err := json.Marshal(v)
+	if err != nil {
+		return ErrorResponse()
+	}
+	r := NewResponse().SetContentType("application/javascript")
+	r.SetContent(callback + "(" + string(body) + ");")
+	return r
+}
+
+// StreamJson creates a streaming JSON response: each encoded item is written
+// per iteration and flushed; the stream ends after the last item.
+func StreamJson(data []any, status ...int) *Response {
+	code := http.StatusOK
+	if len(status) > 0 {
+		code = status[0]
+	}
+	r := NewResponse().SetCode(code).SetContentType("application/json")
+	r.SetStream(func(w io.Writer) bool {
+		enc := json.NewEncoder(w)
+		for _, item := range data {
+			if err := enc.Encode(item); err != nil {
+				return false
+			}
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+		return false
+	})
+	return r
+}
+
+// EventStream creates a server-sent events response; the callback writes one
+// event per invocation and returns false to end the stream.
+func EventStream(write func(w io.Writer) bool) *Response {
+	r := NewResponse().SetContentType("text/event-stream")
+	r.Header("Cache-Control", "no-cache")
+	r.SetStream(write)
+	return r
+}
+
 func MakeResponse(v interface{}) *Response {
 	r := NewResponse()
 	if v == nil {

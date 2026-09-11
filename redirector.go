@@ -51,6 +51,11 @@ func (r *Redirector) To(path string, status ...int) *Response {
 	return Redirect(path, code)
 }
 
+// Secure redirects to an https URL.
+func (r *Redirector) Secure(path string, status ...int) *Response {
+	return r.To(r.generator.To(path), status...)
+}
+
 // Away redirects to an external URL without normalization.
 func (r *Redirector) Away(url string, status ...int) *Response {
 	return r.To(url, status...)

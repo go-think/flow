@@ -186,11 +186,25 @@ func (u *UrlGenerator) currentRequest() *Request {
 }
 
 // To resolves a path into a normalized, router-relative URL (leading slash).
-func (u *UrlGenerator) To(path string) string {
-	if strings.HasPrefix(path, "/") {
-		return path
+// An optional query map is appended (sorted), mirroring URL::to with extras.
+func (u *UrlGenerator) To(path string, extraQuery ...map[string]string) string {
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
 	}
-	return "/" + path
+	if len(extraQuery) > 0 && extraQuery[0] != nil {
+		q := url.Values{}
+		for k, v := range extraQuery[0] {
+			q.Set(k, v)
+		}
+		if enc := q.Encode(); enc != "" {
+			sep := "?"
+			if strings.Contains(path, "?") {
+				sep = "&"
+			}
+			path = path + sep + enc
+		}
+	}
+	return path
 }
 
 // Current returns the path of the request being handled, without the query

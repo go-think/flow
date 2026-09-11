@@ -316,6 +316,12 @@ func (r *router) Dispatch(request any) *Response {
 		}
 		var notAllowed *MethodNotAllowedError
 		if errors.As(err, &notAllowed) {
+			// OPTIONS 请求自动返回 200 + Allow（对齐 Laravel getRouteForMethods）。
+			if req.IsMethod("OPTIONS") {
+				res := NewResponse().SetCode(http.StatusOK)
+				res.Header("Allow", strings.Join(notAllowed.Allowed, ", "))
+				return res
+			}
 			res := NewResponse().SetCode(http.StatusMethodNotAllowed)
 			res.Header("Allow", strings.Join(notAllowed.Allowed, ", "))
 			return res
