@@ -114,6 +114,12 @@ func (r *Redirector) Guest(path string, status ...int) *Response {
 	return r.To(path, status...)
 }
 
+// PreviousPath redirects to the path of the previous URL.
+func (r *Redirector) PreviousPath(fallback string, status ...int) *Response {
+	prev := r.generator.PreviousPath(fallback)
+	return r.To(prev, status...)
+}
+
 // Intended redirects to the URL the user was heading to before being
 // intercepted, or to the default.
 func (r *Redirector) Intended(defaultPath string, status ...int) *Response {

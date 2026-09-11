@@ -1482,6 +1482,9 @@ func resolveMiddleware(m interface{}, r *router) []Middleware {
 
 		if group := r.GetMiddlewareGroup(name); group != nil {
 			for _, gm := range group {
+				if entry, isStr := gm.(string); isStr && entry == name {
+					panic(fmt.Sprintf("flow: [%s] middleware group is referencing itself", name))
+				}
 				resolved = append(resolved, resolveMiddleware(gm, r)...)
 			}
 		} else if alias := r.GetRouteMiddleware(name); alias != nil {

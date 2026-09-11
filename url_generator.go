@@ -218,6 +218,30 @@ func (u *UrlGenerator) Current() string {
 	return req.Path()
 }
 
+// Full returns the full URL of the request being handled, including the
+// query string.
+func (u *UrlGenerator) Full() string {
+	req := u.currentRequest()
+	if req == nil {
+		return ""
+	}
+	httpReq := req.GetHttpRequest()
+	if httpReq == nil || httpReq.URL == nil {
+		return ""
+	}
+	return httpReq.URL.String()
+}
+
+// PreviousPath returns the path portion of the previous URL recorded in the
+// session.
+func (u *UrlGenerator) PreviousPath(fallback string) string {
+	prev := u.Previous(fallback)
+	if idx := strings.Index(prev, "?"); idx != -1 {
+		prev = prev[:idx]
+	}
+	return prev
+}
+
 // Previous returns the previous URL recorded in the session, falling back to
 // the given fallback (or "/") when unavailable.
 func (u *UrlGenerator) Previous(fallback string) string {
