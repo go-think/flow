@@ -219,32 +219,36 @@ func (f ParameterResolverFunc) ResolveParameter(paramType reflect.Type, request 
 type router struct {
 	inited bool
 
-	method             []string
-	prefix             string
-	pattern            string
-	handler            interface{}
-	middlewares        []interface{}
-	withoutMiddleware  []interface{}
-	group              *router
-	controllerPrefix   string
-	name               string
-	wheres             map[string]string
-	groupWheres        map[string]string
-	groupMetadata      map[string]any
-	domain             string
-	patterns           map[string]string
-	signatureKey       string
-	middlewareAliases  map[string]interface{}
-	middlewareGroups   map[string][]interface{}
-	middlewarePriority []interface{}
-	parameterResolver  ParameterResolver
-	binders            map[string]Binder
-	pending            []*PendingResourceRegistration
-	registered         bool
-	autoRegister       bool
-	scopedBindings     bool
-	withTrashed        bool
-	missing            func(request *Request, err error) any
+	method                  []string
+	prefix                  string
+	pattern                 string
+	handler                 interface{}
+	middlewares             []interface{}
+	withoutMiddleware       []interface{}
+	group                   *router
+	controllerPrefix        string
+	name                    string
+	wheres                  map[string]string
+	groupWheres             map[string]string
+	groupMetadata           map[string]any
+	domain                  string
+	patterns                map[string]string
+	signatureKey            string
+	middlewareAliases       map[string]interface{}
+	middlewareGroups        map[string][]interface{}
+	middlewarePriority      []interface{}
+	parameterResolver       ParameterResolver
+	binders                 map[string]Binder
+	pending                 []*PendingResourceRegistration
+	registered              bool
+	autoRegister            bool
+	resourceSingular        bool
+	resourceParams          map[string]string
+	resourceVerbsMap        map[string]string
+	implicitBindingResolver func(route *Route, key, value string) any
+	scopedBindings          bool
+	withTrashed             bool
+	missing                 func(request *Request, err error) any
 
 	collects []*router
 

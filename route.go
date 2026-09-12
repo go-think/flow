@@ -50,8 +50,12 @@ type Route struct {
 	httpOnly          bool
 	domain            string
 	scopedBindings    bool
+	scopedDisabled    bool
 	withTrashed       bool
 	missing           func(request *Request, err error) any
+	canList           map[string][]any
+	lockSeconds       int
+	waitSeconds       int
 
 	router *router // back reference for resolver/registry lookups
 

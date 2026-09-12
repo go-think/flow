@@ -176,6 +176,38 @@ func (c *RouteCollection) ReindexName(route *Route) {
 	c.byName[route.GetName()] = route
 }
 
+// GetByMethod returns all routes registered for a given HTTP verb
+// (Laravel: get($method)).
+func (c *RouteCollection) GetByMethod(method string) []*Route {
+	return c.regexes[method]
+}
+
+// GetRoutesByMethod returns all routes grouped by HTTP verb
+// (Laravel: getRoutesByMethod).
+func (c *RouteCollection) GetRoutesByMethod() map[string][]*Route {
+	out := make(map[string][]*Route)
+	for m, routes := range c.regexes {
+		out[m] = routes
+	}
+	return out
+}
+
+// GetRoutesByName returns all named routes
+// (Laravel: getRoutesByName).
+func (c *RouteCollection) GetRoutesByName() map[string]*Route {
+	out := make(map[string]*Route, len(c.byName))
+	for name, route := range c.byName {
+		out[name] = route
+	}
+	return out
+}
+
+// Count returns the total number of registered routes
+// (Laravel: Countable::count).
+func (c *RouteCollection) Count() int {
+	return len(c.routes)
+}
+
 // HasNamedRoute reports whether a route with the given name exists.
 func (c *RouteCollection) HasNamedRoute(name string) bool {
 	_, ok := c.byName[name]
