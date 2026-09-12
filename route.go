@@ -438,7 +438,9 @@ func (r *Route) Run(request *Request, params ...[]*parameter) (result any) {
 
 	// Atomic lock acquisition for Block-enabled routes (Laravel: Route::block).
 	if r.lockSeconds > 0 {
-		lockKey := "route:" + r.uri
+		lockKey := r.methods[0] + ":" + r.domain + ":" + r.uri
+		lockKey = strings.ReplaceAll(lockKey, "{", "_")
+		lockKey = strings.ReplaceAll(lockKey, "}", "_")
 		release := func() { routeLocks.Delete(lockKey) }
 		if _, loaded := routeLocks.LoadOrStore(lockKey, time.Now()); loaded {
 			deadline := time.Now().Add(time.Duration(r.waitSeconds) * time.Second)

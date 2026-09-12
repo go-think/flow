@@ -120,35 +120,29 @@ func (r *Route) GetCan() map[string][]any {
 
 // SignatureParameters extracts the struct fields of the handler's first
 // bindable parameter via reflection (Laravel: RouteSignatureParameters).
+// SignatureParameters extracts the parameter types of the route handler
+// (Laravel: RouteSignatureParameters::fromAction). Each returned field's
+// Type corresponds to a handler parameter.
 func (r *Route) SignatureParameters(conditions ...string) []reflect.StructField {
 	if r.handler == nil {
 		return nil
 	}
 	v := reflect.ValueOf(r.handler)
-	if v.Kind() != reflect.Func || v.Type().NumIn() == 0 {
+	if v.Kind() != reflect.Func {
 		return nil
 	}
-	t := v.Type().In(0)
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-	if t.Kind() != reflect.Struct {
-		return nil
-	}
-
+	t := v.Type()
 	var fields []reflect.StructField
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		include := true
-		for _, cond := range conditions {
-			switch cond {
-			case "backed_enum":
-				include = field.Type.Kind() == reflect.String || field.Type.Kind() == reflect.Int
-			}
+	for i := 0; i < t.NumIn(); i++ {
+		pt := t.In(i)
+		// Skip *Request and Context (not bindable parameters).
+		if pt == reflect.TypeOf((*Request)(nil)) || pt == reflect.TypeOf(Context{}) {
+			continue
 		}
-		if include {
-			fields = append(fields, field)
-		}
+		fields = append(fields, reflect.StructField{
+			Name: fmt.Sprintf("Param%d", i),
+			Type: pt,
+		})
 	}
 	return fields
 }

@@ -235,18 +235,7 @@ func (p *PendingResourceRegistration) register() {
 		}
 	}
 
-	// Resolve parameter names for segments with overrides if present.
-	resolveParam := func(seg string) string {
-		if p.options.Parameters != nil {
-			if override, ok := p.options.Parameters[seg]; ok {
-				return override
-			}
-		}
-		return singularize(seg)
-	}
-
-	// Global resource config from the router affects parameter naming,
-	// verb overrides and singularization.
+	// Merge per-resource and global parameter overrides.
 	effectiveParams := p.options.Parameters
 	if len(globalResourceParams) > 0 {
 		if effectiveParams == nil {
@@ -257,6 +246,16 @@ func (p *PendingResourceRegistration) register() {
 				effectiveParams[k] = v
 			}
 		}
+	}
+
+	// Resolve parameter names for segments with overrides if present.
+	resolveParam := func(seg string) string {
+		if effectiveParams != nil {
+			if override, ok := effectiveParams[seg]; ok {
+				return override
+			}
+		}
+		return singularize(seg)
 	}
 
 	// A nested name ("albums.photos") becomes

@@ -25,11 +25,23 @@ func (r *MiddlewareNameResolver) Resolve(name string) ([]any, error) {
 	if _, isGroup := r.groups[name]; isGroup {
 		return r.resolveEntries(name, nil)
 	}
-	// Alias resolution
-	if alias, ok := r.aliases[name]; ok {
+	// Alias resolution with :params suffix preservation
+	aliasName, aliasParams := splitAliasParams(name)
+	if alias, ok := r.aliases[aliasName]; ok {
+		if aliasParams != "" {
+			return []any{fmt.Sprintf("%v:%s", alias, aliasParams)}, nil
+		}
 		return []any{alias}, nil
 	}
 	return nil, fmt.Errorf("flow: middleware [%s] not found as group or alias", name)
+}
+
+// splitAliasParams splits "alias:param1,param2" into alias and params.
+func splitAliasParams(name string) (string, string) {
+	if idx := strings.Index(name, ":"); idx != -1 {
+		return name[:idx], name[idx+1:]
+	}
+	return name, ""
 }
 
 // resolveEntries is the internal recursive expansion.

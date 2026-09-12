@@ -453,6 +453,14 @@ func isExcludedMiddleware(m interface{}, excluded []interface{}, r *router) bool
 		if m == e || reflect.DeepEqual(m, e) {
 			return true
 		}
+		// Interface satisfaction: if the excluded entry is an interface type
+		// and the middleware implements it, consider it excluded.
+		if m != nil && e != nil {
+			mt, et := reflect.TypeOf(m), reflect.TypeOf(e)
+			if et.Kind() == reflect.Interface && mt.Implements(et) {
+				return true
+			}
+		}
 		// If e is a string, check if it is a middleware group that contains m
 		if name, ok := e.(string); ok && r != nil {
 			if group := r.GetMiddlewareGroup(name); group != nil {
@@ -1393,6 +1401,8 @@ type compiledRouteData struct {
 	Secure            bool              `json:"secure,omitempty"`
 	ScopeBindings     bool              `json:"scope_bindings,omitempty"`
 	WithTrashed       bool              `json:"with_trashed,omitempty"`
+	LockSeconds       int               `json:"lock_seconds,omitempty"`
+	WaitSeconds       int               `json:"wait_seconds,omitempty"`
 }
 
 // Compile serializes routes whose actions are controller actions; closures
@@ -1424,6 +1434,8 @@ func (r *router) Compile() ([]byte, error) {
 			Secure:            route.IsSecure(),
 			ScopeBindings:     route.EnforcesScopedBindings(),
 			WithTrashed:       route.AllowsTrashedBindings(),
+			LockSeconds:       route.LocksFor(),
+			WaitSeconds:       route.WaitsFor(),
 		}
 		out = append(out, entry)
 	}
@@ -1466,6 +1478,8 @@ func (r *router) RestoreCompiled(data []byte) error {
 			secure:            cr.Secure,
 			scopedBindings:    cr.ScopeBindings,
 			withTrashed:       cr.WithTrashed,
+			lockSeconds:       cr.LockSeconds,
+			waitSeconds:       cr.WaitSeconds,
 			router:            r,
 		}
 		r.collection.Add(entity)

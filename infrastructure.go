@@ -102,7 +102,11 @@ func (b *RouteParameterBinder) Parameters(req *Request) []*parameter {
 			if i < len(matches)-1 {
 				val = matches[i+1]
 			}
-			out = append(out, &parameter{name: name, value: val})
+			p := &parameter{name: name, value: val}
+			out = append(out, p)
+			if req != nil {
+				req.SetRouteParam(name, val)
+			}
 		}
 		break
 	}
