@@ -437,7 +437,7 @@ func (r *router) gatherRouteMiddleware(route *Route) []Middleware {
 		}
 		raw = append(raw, m)
 	}
-	raw = sortMiddlewareRaw(raw, r.middlewarePriority)
+	raw = SortMiddleware(r.middlewarePriority, raw)
 
 	var resolved []Middleware
 	for _, m := range raw {
@@ -635,6 +635,12 @@ func (r *router) Group(args ...any) {
 	}
 	if attrs.WithTrashed {
 		node.withTrashed = true
+	}
+	for k, v := range attrs.Metadata {
+		if node.groupMetadata == nil {
+			node.groupMetadata = make(map[string]any)
+		}
+		node.groupMetadata[k] = v
 	}
 	for k, v := range attrs.Wheres {
 		if node.groupWheres == nil {

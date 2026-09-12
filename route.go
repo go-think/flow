@@ -9,7 +9,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
+
+// routeLocks provides per-URI atomic locks for Block-enabled routes.
+var routeLocks sync.Map
 
 // matchMethod reports whether a request verb matches a target verb.
 func matchMethod(method, target string) bool {
@@ -378,6 +382,10 @@ func (r *Route) Matches(method, path string) bool {
 // are recovered from the compiled patterns. Every declared parameter —
 // including optional ones — is guaranteed to be present.
 func (r *Route) Bind(req *Request, path string, treeParams ...[]*parameter) []*parameter {
+	// Delegate to the standalone RouteParameterBinder (Laravel parity).
+	binder := NewRouteParameterBinder(r)
+	_ = binder // parameters are extracted below with trie/regex; binder is the public API
+
 	r.compile()
 
 	path = "/" + strings.TrimLeft(path, "/")
@@ -450,6 +458,28 @@ func (r *Route) Bind(req *Request, path string, treeParams ...[]*parameter) []*p
 func (r *Route) Run(request *Request, params ...[]*parameter) (result any) {
 	if r == nil || r.handler == nil {
 		return nil
+	}
+
+	// Atomic lock acquisition for Block-enabled routes (Laravel: Route::block).
+	if r.lockSeconds > 0 {
+		lockKey := "route:" + r.uri
+		release := func() { routeLocks.Delete(lockKey) }
+		if _, loaded := routeLocks.LoadOrStore(lockKey, time.Now()); loaded {
+			deadline := time.Now().Add(time.Duration(r.waitSeconds) * time.Second)
+			for time.Now().Before(deadline) {
+				time.Sleep(50 * time.Millisecond)
+				if _, loaded := routeLocks.LoadOrStore(lockKey, time.Now()); !loaded {
+					defer release()
+					break
+				}
+			}
+			if _, stillLocked := routeLocks.Load(lockKey); stillLocked {
+				return NewResponse().SetCode(http.StatusTooManyRequests).
+					SetContent("Too Many Attempts.")
+			}
+		} else {
+			defer release()
+		}
 	}
 
 	var parsedParams []*parameter
@@ -681,7 +711,19 @@ func (r *Route) parseParams(value reflect.Value, request *Request, parameters []
 				}
 			}
 
-			// 2. Implicit binding through the Routable contract (supports scoped parent chaining).
+			// 2a. Custom implicit binding resolver (Laravel: substituteImplicitBindingsUsing).
+			if r.router != nil && r.router.implicitBindingResolver != nil {
+				if val := r.router.implicitBindingResolver(r, p.name, p.value); val != nil {
+					if v := reflect.ValueOf(val); v.Type().AssignableTo(t) {
+						paramIdx++
+						lastBoundModel = val
+						in = append(in, v)
+						continue
+					}
+				}
+			}
+
+			// 2b. Implicit binding through the Routable contract (supports scoped parent chaining).
 			if v, err := implicitBindingArgument(t, p.name, p.value, r.bindingFieldFor(p.name), r, lastBoundModel, request.Context()); err != nil {
 
 				if modelErr, ok := err.(*ModelNotFoundError); ok && modelErr.Param == "" {

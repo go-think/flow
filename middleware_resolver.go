@@ -21,11 +21,15 @@ func NewMiddlewareNameResolver(aliases map[string]any, groups map[string][]any) 
 // into its concrete list. Group references are recursively expanded with
 // self-reference detection (Laravel: parseMiddlewareGroup).
 func (r *MiddlewareNameResolver) Resolve(name string) ([]any, error) {
-	return r.resolve(name, nil)
-}
-
-func (r *MiddlewareNameResolver) resolve(name string, seen []string) ([]any, error) {
-	return r.resolveEntries(name, seen)
+	// Group expansion
+	if _, isGroup := r.groups[name]; isGroup {
+		return r.resolveEntries(name, nil)
+	}
+	// Alias resolution
+	if alias, ok := r.aliases[name]; ok {
+		return []any{alias}, nil
+	}
+	return nil, fmt.Errorf("flow: middleware [%s] not found as group or alias", name)
 }
 
 // resolveEntries is the internal recursive expansion.

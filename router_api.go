@@ -38,18 +38,21 @@ func (r *router) Input(key string, defaultValue ...any) any {
 // (Laravel: singularResourceParameters).
 func (r *router) SingularResourceParameters(singular bool) {
 	r.resourceSingular = singular
+	globalResourceSingular = singular
 }
 
 // SetResourceParameters sets the global resource parameter mapping
 // (Laravel: resourceParameters).
 func (r *router) SetResourceParameters(params map[string]string) {
 	r.resourceParams = params
+	globalResourceParams = params
 }
 
 // SetResourceVerbs sets the global resource verb overrides
 // (Laravel: resourceVerbs).
 func (r *router) SetResourceVerbs(verbs map[string]string) {
 	r.resourceVerbsMap = verbs
+	globalResourceVerbsMap = verbs
 }
 
 // SetContainer sets the router's dependency resolver

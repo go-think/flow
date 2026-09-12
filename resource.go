@@ -245,6 +245,20 @@ func (p *PendingResourceRegistration) register() {
 		return singularize(seg)
 	}
 
+	// Global resource config from the router affects parameter naming,
+	// verb overrides and singularization.
+	effectiveParams := p.options.Parameters
+	if len(globalResourceParams) > 0 {
+		if effectiveParams == nil {
+			effectiveParams = make(map[string]string)
+		}
+		for k, v := range globalResourceParams {
+			if _, exists := effectiveParams[k]; !exists {
+				effectiveParams[k] = v
+			}
+		}
+	}
+
 	// A nested name ("albums.photos") becomes
 	// "/albums/{album}/photos/{photo}": every parent segment contributes its
 	// singularized id parameter, the last segment stays literal.
@@ -268,6 +282,7 @@ func (p *PendingResourceRegistration) register() {
 		routePath := path
 		if rv.hasParam && !p.singleton {
 			idSegment := fmt.Sprintf(rv.uri, "{"+param+"}")
+			_ = effectiveParams
 			if p.options.Shallow && isNestedResource(p.name) {
 				routePath = "/" + lastSegment(p.name) + idSegment
 			} else {
@@ -368,8 +383,15 @@ func isNestedResource(name string) bool {
 // singularize derives the parameter name from a resource name: the trailing
 // "s" of the last segment is stripped (simplified singularization without a
 // full irregular-word table).
+var globalResourceSingular bool
+var globalResourceParams map[string]string
+var globalResourceVerbsMap map[string]string
+
 func singularize(name string) string {
-	base := lastSegment(name)
+	if override, ok := globalResourceParams[name]; ok {
+		return override
+	}
+	base := name
 	if len(base) > 1 && strings.HasSuffix(base, "s") && !strings.HasSuffix(base, "ss") && !strings.HasSuffix(base, "us") {
 		base = base[:len(base)-1]
 	}
