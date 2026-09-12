@@ -185,12 +185,16 @@ type Router interface {
 // as a name prefix, middleware entries are appended, and where constraints
 // are merged.
 type GroupAttributes struct {
-	Prefix     string
-	Name       string
-	Domain     string
-	Controller string // namespace prefix applied to string controller actions
-	Middleware []interface{}
-	Wheres     map[string]string
+	Prefix            string
+	Name              string
+	Domain            string
+	Controller        string
+	Middleware        []interface{}
+	Wheres            map[string]string
+	Metadata          map[string]any
+	WithoutMiddleware []interface{}
+	ScopeBindings     bool
+	WithTrashed       bool
 }
 
 var verbs = []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
@@ -247,6 +251,7 @@ type router struct {
 	resourceVerbsMap        map[string]string
 	implicitBindingResolver func(route *Route, key, value string) any
 	scopedBindings          bool
+	scopedDisabled          bool
 	withTrashed             bool
 	missing                 func(request *Request, err error) any
 
@@ -622,6 +627,15 @@ func (r *router) Group(args ...any) {
 	if attrs.Domain != "" {
 		node.domain = attrs.Domain
 	}
+	if len(attrs.WithoutMiddleware) > 0 {
+		node.withoutMiddleware = append(node.withoutMiddleware, attrs.WithoutMiddleware...)
+	}
+	if attrs.ScopeBindings {
+		node.scopedBindings = true
+	}
+	if attrs.WithTrashed {
+		node.withTrashed = true
+	}
 	for k, v := range attrs.Wheres {
 		if node.groupWheres == nil {
 			node.groupWheres = make(map[string]string)
@@ -942,6 +956,7 @@ func (r *router) initRoute() *router {
 			middlewareGroups:   r.middlewareGroups,
 			middlewarePriority: r.middlewarePriority,
 			scopedBindings:     r.scopedBindings,
+			scopedDisabled:     r.scopedDisabled,
 			withTrashed:        r.withTrashed,
 			missing:            r.missing,
 		}
@@ -968,6 +983,7 @@ func (r *router) cloneRoute() *router {
 		middlewareGroups:   r.middlewareGroups,
 		middlewarePriority: r.middlewarePriority,
 		scopedBindings:     r.scopedBindings,
+		scopedDisabled:     r.scopedDisabled,
 		withTrashed:        r.withTrashed,
 		missing:            r.missing,
 	}
@@ -1356,10 +1372,21 @@ func (r *router) SetControllerDispatcher(dispatcher ControllerDispatcher) {
 
 // compiledRouteData is the JSON-serializable form of a cacheable route.
 type compiledRouteData struct {
-	Methods []string `json:"methods"`
-	URI     string   `json:"uri"`
-	Name    string   `json:"name,omitempty"`
-	Action  string   `json:"action"`
+	Methods           []string          `json:"methods"`
+	URI               string            `json:"uri"`
+	Name              string            `json:"name,omitempty"`
+	Action            string            `json:"action"`
+	Wheres            map[string]string `json:"wheres,omitempty"`
+	Defaults          map[string]any    `json:"defaults,omitempty"`
+	Metadata          map[string]any    `json:"metadata,omitempty"`
+	Middleware        []any             `json:"middleware,omitempty"`
+	WithoutMiddleware []any             `json:"without_middleware,omitempty"`
+	Domain            string            `json:"domain,omitempty"`
+	BindingFields     map[string]string `json:"binding_fields,omitempty"`
+	Fallback          bool              `json:"fallback,omitempty"`
+	Secure            bool              `json:"secure,omitempty"`
+	ScopeBindings     bool              `json:"scope_bindings,omitempty"`
+	WithTrashed       bool              `json:"with_trashed,omitempty"`
 }
 
 // Compile serializes routes whose actions are controller actions; closures
@@ -1375,12 +1402,24 @@ func (r *router) Compile() ([]byte, error) {
 		if !ok {
 			return nil, fmt.Errorf("flow: route [%s] has a non-serializable action and cannot be cached", route.URI())
 		}
-		out = append(out, compiledRouteData{
-			Methods: route.Methods(),
-			URI:     route.URI(),
-			Name:    route.GetName(),
-			Action:  name + "@" + action.Method,
-		})
+		entry := compiledRouteData{
+			Methods:           route.Methods(),
+			URI:               route.URI(),
+			Name:              route.GetName(),
+			Action:            name + "@" + action.Method,
+			Wheres:            route.Wheres(),
+			Defaults:          route.Defaults(),
+			Metadata:          route.metadata,
+			Middleware:        route.Middleware(),
+			WithoutMiddleware: route.ExcludedMiddleware(),
+			Domain:            route.GetDomain(),
+			BindingFields:     route.bindingFields,
+			Fallback:          route.IsFallback(),
+			Secure:            route.IsSecure(),
+			ScopeBindings:     route.EnforcesScopedBindings(),
+			WithTrashed:       route.AllowsTrashedBindings(),
+		}
+		out = append(out, entry)
 	}
 	return json.Marshal(out)
 }
@@ -1400,12 +1439,28 @@ func (r *router) RestoreCompiled(data []byte) error {
 		if _, ok := r.controllers[cr.Action[:strings.Index(cr.Action, "@")]]; !ok {
 			return fmt.Errorf("flow: controller [%s] is not registered", cr.Action[:strings.Index(cr.Action, "@")])
 		}
+		handler := parseControllerAction(cr.Action)
+		if ca, ok := handler.(ControllerAction); ok {
+			ca.Controller = cr.Action[:strings.Index(cr.Action, "@")]
+			handler = ca
+		}
 		entity := &Route{
-			methods: cr.Methods,
-			uri:     cr.URI,
-			name:    cr.Name,
-			handler: parseControllerAction(cr.Action),
-			router:  r,
+			methods:           cr.Methods,
+			uri:               cr.URI,
+			name:              cr.Name,
+			handler:           handler,
+			wheres:            cr.Wheres,
+			defaults:          cr.Defaults,
+			metadata:          cr.Metadata,
+			middlewares:       cr.Middleware,
+			withoutMiddleware: cr.WithoutMiddleware,
+			domain:            cr.Domain,
+			bindingFields:     cr.BindingFields,
+			fallback:          cr.Fallback,
+			secure:            cr.Secure,
+			scopedBindings:    cr.ScopeBindings,
+			withTrashed:       cr.WithTrashed,
+			router:            r,
 		}
 		r.collection.Add(entity)
 	}

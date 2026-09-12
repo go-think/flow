@@ -42,6 +42,9 @@ type UrlGenerator struct {
 	missingNamedRouteResolver func(name string, params map[string]string) string
 	requestProvider           func() *Request
 	baseURL                   string
+	forcedScheme              string
+	forcedRootURL             string
+	assetOrigin               string
 }
 
 // NewUrlGenerator creates a UrlGenerator bound to the given named-route
@@ -387,6 +390,73 @@ func (u *UrlGenerator) HasValidSignatureAbsolute(req *Request) bool {
 	return false
 }
 
+// ForceScheme forces the URL scheme (e.g. "https").
+func (u *UrlGenerator) ForceScheme(scheme string) *UrlGenerator {
+	u.forcedScheme = scheme
+	return u
+}
+
+// ForceRootURL forces the root URL for all generated URLs.
+func (u *UrlGenerator) ForceRootURL(root string) *UrlGenerator {
+	u.baseURL = strings.TrimSuffix(root, "/")
+	return u
+}
+
+// UseAssetOrigin sets a separate origin for asset URLs.
+func (u *UrlGenerator) UseAssetOrigin(origin string) *UrlGenerator {
+	u.assetOrigin = origin
+	return u
+}
+
+// Asset resolves an asset path against the asset origin or base URL.
+func (u *UrlGenerator) Asset(path string) string {
+	origin := u.assetOrigin
+	if origin == "" {
+		origin = u.baseURL
+	}
+	if origin == "" {
+		req := u.currentRequest()
+		if req != nil {
+			httpReq := req.GetHttpRequest()
+			if httpReq != nil {
+				origin = "http://" + httpReq.Host
+			}
+		}
+	}
+	if origin == "" {
+		return path
+	}
+	return strings.TrimSuffix(origin, "/") + "/" + strings.TrimLeft(path, "/")
+}
+
+// SecureAsset resolves an asset path with HTTPS.
+func (u *UrlGenerator) SecureAsset(path string) string {
+	origin := u.assetOrigin
+	if origin == "" {
+		origin = u.baseURL
+	}
+	if origin == "" {
+		return path
+	}
+	origin = strings.Replace(origin, "http://", "https://", 1)
+	return strings.TrimSuffix(origin, "/") + "/" + strings.TrimLeft(path, "/")
+}
+
+// Query resolves a path with a query string attached.
+func (u *UrlGenerator) Query(path string, query map[string]string) string {
+	u.SetMissingNamedRouteResolver(nil)
+	q := ""
+	for k, v := range query {
+		if q == "" {
+			q = "?"
+		} else {
+			q += "&"
+		}
+		q += k + "=" + v
+	}
+	return u.To(path) + q
+}
+
 // absoluteURL joins scheme and host with a path (and its query, if present).
 func (u *UrlGenerator) absoluteURL(req *Request, pathWithQuery string) string {
 	if u.baseURL != "" {
@@ -396,7 +466,13 @@ func (u *UrlGenerator) absoluteURL(req *Request, pathWithQuery string) string {
 	if req.Request.TLS != nil || strings.EqualFold(req.Header("X-Forwarded-Proto"), "https") || req.Request.URL != nil && req.Request.URL.Scheme == "https" {
 		scheme = "https"
 	}
+	if u.forcedScheme != "" {
+		scheme = u.forcedScheme
+	}
 	host := req.Request.Host
+	if u.baseURL != "" {
+		return strings.TrimSuffix(u.baseURL, "/") + pathWithQuery
+	}
 	return scheme + "://" + host + pathWithQuery
 }
 
