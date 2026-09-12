@@ -69,4 +69,14 @@ func (r *router) SetImplicitBindingResolver(fn func(route *Route, key, value str
 	r.implicitBindingResolver = fn
 }
 
+// GetMiddlewareAliases returns the full middleware alias table
+// (Laravel: getMiddleware).
+func (r *router) GetMiddlewareAliases() map[string]any {
+	out := make(map[string]any, len(r.middlewareAliases))
+	for k, v := range r.middlewareAliases {
+		out[k] = v
+	}
+	return out
+}
+
 var _ = strings.Contains

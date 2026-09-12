@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -156,6 +157,8 @@ type Router interface {
 	CurrentRequest() *Request
 	// MatchRequest resolves a request to a route and binds its parameters.
 	MatchRequest(request *Request) (*Route, error)
+	// FlushPending materializes deferred resource registrations.
+	FlushPending()
 	// GetRoutes returns every registered route.
 	GetRoutes() []*Route
 
@@ -261,6 +264,7 @@ type router struct {
 	fallback             interface{}
 	currentRoute         *Route
 	currentRequest       *Request
+	currentMu            sync.RWMutex
 	disableMiddleware    bool
 	controllers          map[string]any
 	controllerDispatcher ControllerDispatcher
@@ -303,7 +307,9 @@ func (r *router) Dispatch(request any) *Response {
 	default:
 		return NotFoundResponse()
 	}
+	r.currentMu.Lock()
 	r.currentRequest = req
+	r.currentMu.Unlock()
 	for _, fn := range r.onRouting {
 		fn(req)
 	}
@@ -355,7 +361,9 @@ func (r *router) findRoute(request *Request) (*Route, []*parameter, error) {
 	if route.name != "" {
 		request.Set("_route_name", route.name)
 	}
+	r.currentMu.Lock()
 	r.currentRoute = route
+	r.currentMu.Unlock()
 	return route, params, nil
 }
 
@@ -1237,11 +1245,15 @@ func (r *router) ActionRoutePattern(action string) (string, bool) {
 
 // CurrentRoute returns the route matched by the most recent dispatch.
 func (r *router) CurrentRoute() *Route {
+	r.currentMu.RLock()
+	defer r.currentMu.RUnlock()
 	return r.currentRoute
 }
 
 // CurrentRequest returns the request of the most recent dispatch.
 func (r *router) CurrentRequest() *Request {
+	r.currentMu.RLock()
+	defer r.currentMu.RUnlock()
 	return r.currentRequest
 }
 
@@ -1251,6 +1263,9 @@ func (r *router) MatchRequest(request *Request) (*Route, error) {
 	route, _, err := r.findRoute(request)
 	return route, err
 }
+
+// FlushPending materializes deferred resource registrations.
+func (r *router) FlushPending() { r.flushPending() }
 
 // GetRoutes returns every registered route.
 func (r *router) GetRoutes() []*Route {
@@ -1453,7 +1468,9 @@ func (r *router) RestoreCompiled(data []byte) error {
 	}
 
 	r.collection = NewRouteCollection()
+	r.currentMu.Lock()
 	r.currentRoute = nil
+	r.currentMu.Unlock()
 
 	for _, cr := range out {
 		if _, ok := r.controllers[cr.Action[:strings.Index(cr.Action, "@")]]; !ok {
