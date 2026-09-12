@@ -300,6 +300,10 @@ func (p *PendingResourceRegistration) register() {
 		} else {
 			action = ControllerAction{Controller: p.controller, Method: rv.action}
 		}
+		// 全局 verbs 覆盖 URI 后缀
+		if override, ok := globalResourceVerbsMap[strings.ToLower(rv.action)]; ok {
+			routePath = strings.Replace(routePath, "/"+strings.ToLower(rv.action), "/"+override, 1)
+		}
 		child := p.router.Add(Method(strings.Split(rv.method, ",")...), routePath, action)
 		child.Name(routeName)
 		child.Middleware(p.options.Middleware...)
@@ -383,13 +387,16 @@ func isNestedResource(name string) bool {
 // singularize derives the parameter name from a resource name: the trailing
 // "s" of the last segment is stripped (simplified singularization without a
 // full irregular-word table).
-var globalResourceSingular bool
+var globalResourceSingular = true
 var globalResourceParams map[string]string
 var globalResourceVerbsMap map[string]string
 
 func singularize(name string) string {
 	if override, ok := globalResourceParams[name]; ok {
 		return override
+	}
+	if !globalResourceSingular {
+		return name
 	}
 	base := name
 	if len(base) > 1 && strings.HasSuffix(base, "s") && !strings.HasSuffix(base, "ss") && !strings.HasSuffix(base, "us") {

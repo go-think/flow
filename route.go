@@ -382,10 +382,6 @@ func (r *Route) Matches(method, path string) bool {
 // are recovered from the compiled patterns. Every declared parameter —
 // including optional ones — is guaranteed to be present.
 func (r *Route) Bind(req *Request, path string, treeParams ...[]*parameter) []*parameter {
-	// Delegate to the standalone RouteParameterBinder (Laravel parity).
-	binder := NewRouteParameterBinder(r)
-	_ = binder // parameters are extracted below with trie/regex; binder is the public API
-
 	r.compile()
 
 	path = "/" + strings.TrimLeft(path, "/")
@@ -399,28 +395,8 @@ func (r *Route) Bind(req *Request, path string, treeParams ...[]*parameter) []*p
 			}
 		}
 	} else {
-		for _, variant := range r.expanded {
-			if variant.regex == nil {
-				continue
-			}
-			rawMatches := variant.regex.FindStringSubmatch(path)
-			if len(rawMatches) <= 1 {
-				continue
-			}
-			matches := rawMatches[1:]
-			for k, name := range variant.parameterNames {
-				val := ""
-				if k < len(matches) {
-					val = matches[k]
-				}
-				p := &parameter{name: name, value: val}
-				parameters = append(parameters, p)
-				if req != nil {
-					req.SetRouteParam(name, val)
-				}
-			}
-			break
-		}
+		binder := NewRouteParameterBinder(r)
+		parameters = binder.Parameters(req)
 	}
 
 	for _, variant := range r.expanded {
