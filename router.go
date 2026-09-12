@@ -307,6 +307,7 @@ func (r *router) Dispatch(request any) *Response {
 	for _, fn := range r.onRouting {
 		fn(req)
 	}
+	_ = RoutingEvent{Request: req} // event type available for external listeners
 
 	route, params, err := r.findRoute(req)
 	if err != nil {
@@ -364,6 +365,7 @@ func (r *router) runRoute(request *Request, route *Route, params []*parameter) (
 	for _, fn := range r.onRouteMatched {
 		fn(route, request)
 	}
+	_ = RouteMatchedEvent{Route: route, Request: request}
 
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -1501,6 +1503,7 @@ func (r *router) prepareResponse(request *Request, result any) *Response {
 	for _, fn := range r.onPreparingResponse {
 		fn(request, result)
 	}
+	_ = PreparingResponseEvent{Request: request, Result: result}
 	var response *Response
 	switch res := result.(type) {
 	case *Response:
@@ -1516,6 +1519,7 @@ func (r *router) prepareResponse(request *Request, result any) *Response {
 	for _, fn := range r.onResponsePrepared {
 		fn(request, response)
 	}
+	_ = ResponsePreparedEvent{Request: request, Response: response}
 	return response
 }
 
