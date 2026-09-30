@@ -97,6 +97,8 @@ func TestSemantics_HeadAutoAppend(t *testing.T) {
 	// A HEAD request hits a GET route and never produces a 405.
 	resp := r.Dispatch(httptest.NewRequest(http.MethodHead, "/users", nil))
 	assert.Equal(t, 200, resp.StatusCode())
+	assert.Empty(t, resp.Body())
+	assert.Equal(t, "2", resp.Headers().Get("Content-Length"))
 }
 
 func TestSemantics_405VerbsOrderAndMessage(t *testing.T) {

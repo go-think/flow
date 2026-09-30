@@ -113,3 +113,71 @@ func TestZZScopedDebug(t *testing.T) {
 	res := r.Dispatch(req)
 	fmt.Printf("DBG status=%d body=%q\n", res.StatusCode(), res.Body())
 }
+
+type genericUserEntity struct {
+	ID   string
+	Name string
+}
+
+func TestGenericBindModel(t *testing.T) {
+	r := NewRouter(nil, nil)
+
+	BindModel(r, "user", func(ctx context.Context, value string) (*genericUserEntity, error) {
+		if value == "404" {
+			return nil, fmt.Errorf("user not found")
+		}
+		return &genericUserEntity{ID: value, Name: "User_" + value}, nil
+	})
+
+	r.Get("/profile/{user}", func(u *genericUserEntity) string {
+		if u == nil {
+			return "nil"
+		}
+		return u.Name
+	})
+
+	// Valid user
+	req := httptest.NewRequest("GET", "/profile/99", nil)
+	resp := r.Dispatch(req)
+	assert.Equal(t, http.StatusOK, resp.StatusCode())
+	assert.Equal(t, "User_99", resp.GetContent())
+
+	// Missing user returns 404
+	req404 := httptest.NewRequest("GET", "/profile/404", nil)
+	resp404 := r.Dispatch(req404)
+	assert.Equal(t, http.StatusNotFound, resp404.StatusCode())
+}
+
+func TestRouter_RespondWithRoute(t *testing.T) {
+	var r Router = NewRouter(nil, nil)
+
+	r.Get("/items/{id}", func(id string) string {
+		return "item:" + id
+	}).As("items.show")
+
+	req := httptest.NewRequest("GET", "/items/123", nil)
+	resp := r.RespondWithRoute("items.show", NewRequest(req))
+	assert.Equal(t, http.StatusOK, resp.StatusCode())
+	assert.Equal(t, "item:123", resp.GetContent())
+}
+
+func TestRouter_SubstituteImplicitBindingsUsing(t *testing.T) {
+	var r Router = NewRouter(nil, nil)
+
+	r.SubstituteImplicitBindingsUsing(func(route *Route, key, value string) any {
+		if key == "account" {
+			return "resolved-" + value
+		}
+		return nil
+	})
+
+	r.Get("/accounts/{account}", func(account string) string {
+		return account
+	})
+
+	req := httptest.NewRequest("GET", "/accounts/acct100", nil)
+	resp := r.Dispatch(req)
+	assert.Equal(t, http.StatusOK, resp.StatusCode())
+	assert.Equal(t, "resolved-acct100", resp.GetContent())
+}
+

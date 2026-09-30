@@ -117,6 +117,32 @@ func TestControllerNamespacePrefix(t *testing.T) {
 	assert.Equal(t, "show:7", res.GetContent())
 }
 
+func TestRouterControllerGroup(t *testing.T) {
+	r := New(nil, nil)
+	// Pointer instance
+	r.Controller(&testUserController{}).Group(func(users Router) {
+		users.Get("/orders/{id}", "Show")
+	})
+	// String name
+	r.RegisterController("CustomUser", &testUserController{})
+	r.Controller("CustomUser").Metadata("module", "orders").Group(func(users Router) {
+		users.Get("/custom/{id}", "Show").WithoutScopedBindings()
+	})
+	r.Register()
+
+	httpReq, _ := http.NewRequest("GET", "/orders/99", nil)
+	req := NewRequest(httpReq)
+	req.SetResponseWriter(httptest.NewRecorder())
+	res := r.Dispatch(req)
+	assert.Equal(t, "show:99", res.GetContent())
+
+	httpReq2, _ := http.NewRequest("GET", "/custom/100", nil)
+	req2 := NewRequest(httpReq2)
+	req2.SetResponseWriter(httptest.NewRecorder())
+	res2 := r.Dispatch(req2)
+	assert.Equal(t, "show:100", res2.GetContent())
+}
+
 func TestUnregisteredControllerErrors(t *testing.T) {
 	r := New(nil, nil)
 	r.Get("/broken", "Missing@Show")
@@ -213,3 +239,77 @@ func TestControllerCallActionHook(t *testing.T) {
 	assert.Equal(t, "via-callAction:9", res.GetContent())
 	assert.NotEqual(t, "direct:9", res.GetContent(), "the plain method must not run when CallAction exists")
 }
+
+type testHasMiddlewareController struct{}
+
+func (c *testHasMiddlewareController) Index() string {
+	return "index"
+}
+
+func (c *testHasMiddlewareController) Show(id string) string {
+	return "show:" + id
+}
+
+func (c *testHasMiddlewareController) Edit(id string) string {
+	return "edit:" + id
+}
+
+func (c *testHasMiddlewareController) Middleware() []*MiddlewareDefinition {
+	return []*MiddlewareDefinition{
+		NewMiddlewareDefinition(func(req *Request, next Closure) any {
+			res := next(req)
+			if r, ok := res.(*Response); ok {
+				r.Header("X-Index-Only", "true")
+			}
+			return res
+		}).Only("Index"),
+
+		NewMiddlewareDefinition(func(req *Request, next Closure) any {
+			res := next(req)
+			if r, ok := res.(*Response); ok {
+				r.Header("X-Except-Edit", "true")
+			}
+			return res
+		}).Except("Edit"),
+	}
+}
+
+func TestControllerHasMiddleware(t *testing.T) {
+	r := NewRouter(nil, nil)
+	ctrl := &testHasMiddlewareController{}
+
+	r.Get("/items", ControllerAction{Controller: ctrl, Method: "Index"})
+	r.Get("/items/{id}", ControllerAction{Controller: ctrl, Method: "Show"})
+	r.Get("/items/{id}/edit", ControllerAction{Controller: ctrl, Method: "Edit"})
+
+	// 1. Index should have both middlewares
+	reqIndex := httptest.NewRequest("GET", "/items", nil)
+	respIndex := r.Dispatch(reqIndex)
+	assert.Equal(t, "true", respIndex.Headers().Get("X-Index-Only"))
+	assert.Equal(t, "true", respIndex.Headers().Get("X-Except-Edit"))
+
+	// 2. Show should NOT have X-Index-Only, but SHOULD have X-Except-Edit
+	reqShow := httptest.NewRequest("GET", "/items/10", nil)
+	respShow := r.Dispatch(reqShow)
+	assert.Equal(t, "", respShow.Headers().Get("X-Index-Only"))
+	assert.Equal(t, "true", respShow.Headers().Get("X-Except-Edit"))
+
+	// 3. Edit should have NEITHER middleware
+	reqEdit := httptest.NewRequest("GET", "/items/10/edit", nil)
+	respEdit := r.Dispatch(reqEdit)
+	assert.Equal(t, "", respEdit.Headers().Get("X-Index-Only"))
+	assert.Equal(t, "", respEdit.Headers().Get("X-Except-Edit"))
+}
+
+func TestControllerActionPointerDispatch(t *testing.T) {
+	r := NewRouter(nil, nil)
+	ctrl := &testHasMiddlewareController{}
+
+	r.Get("/pointer-items/{id}", &ControllerAction{Controller: ctrl, Method: "Show"})
+
+	req := httptest.NewRequest("GET", "/pointer-items/99", nil)
+	resp := r.Dispatch(req)
+	assert.Equal(t, 200, resp.StatusCode())
+	assert.Equal(t, "show:99", resp.GetContent())
+}
+

@@ -44,7 +44,7 @@ var singletonCreatableVerbs = []resourceVerb{
 }
 
 // singletonDestroyableVerb appends for destroyable-only singletons
-//).
+// ).
 var singletonDestroyableVerb = resourceVerb{action: "Destroy", method: "DELETE", uri: "", hasParam: false}
 
 // ResourceOptions restrict and customize a resource registration.
@@ -140,7 +140,7 @@ type ResourceOption func(*ResourceOptions)
 
 // WithBaseName sets the base route name of the resource, the string form of
 // the reference names option: the final name becomes "prefix.base.action"
-//).
+// ).
 func WithBaseName(base string) ResourceOption {
 	return func(o *ResourceOptions) {
 		o.BaseName = base
@@ -243,7 +243,7 @@ func (p *PendingResourceRegistration) WithoutMiddleware(middleware ...any) *Pend
 
 // WithoutMiddlewareFor excludes middleware from specific actions of the
 // resource, replacing the previous list for those actions
-//.
+// .
 func (p *PendingResourceRegistration) WithoutMiddlewareFor(actions []string, middleware ...any) *PendingResourceRegistration {
 	if p.options.WithoutMiddlewareFor == nil {
 		p.options.WithoutMiddlewareFor = make(map[string][]any)
@@ -287,7 +287,7 @@ func (p *PendingResourceRegistration) Destroyable() *PendingResourceRegistration
 // only the listed actions are (the reference implementation: withTrashed — empty means
 // an intersection of the method list with show/edit/update). The flag is
 // only applied when WithTrashed was actually called
-//), and never
+// ), and never
 // on singleton resources.
 func (p *PendingResourceRegistration) WithTrashed(methods ...string) *PendingResourceRegistration {
 	p.options.Trashed = methods
@@ -311,7 +311,7 @@ func (p *PendingResourceRegistration) BaseName(base string) *PendingResourceRegi
 }
 
 // WhereNumber adds a numeric regex constraint to the given resource parameters
-//.
+// .
 func (p *PendingResourceRegistration) WhereNumber(names ...string) *PendingResourceRegistration {
 	return p.assignWheres("[0-9]+", names)
 }
@@ -329,19 +329,19 @@ func (p *PendingResourceRegistration) WhereAlphaNumeric(names ...string) *Pendin
 }
 
 // WhereUuid adds a UUID regex constraint to the given resource parameters
-//.
+// .
 func (p *PendingResourceRegistration) WhereUuid(names ...string) *PendingResourceRegistration {
 	return p.assignWheres(`[\da-fA-F]{8}-[\da-fA-F]{4}-[\da-fA-F]{4}-[\da-fA-F]{4}-[\da-fA-F]{12}`, names)
 }
 
 // WhereUlid adds a ULID regex constraint to the given resource parameters
-//.
+// .
 func (p *PendingResourceRegistration) WhereUlid(names ...string) *PendingResourceRegistration {
 	return p.assignWheres(`[0-7][0-9a-hjkmnp-tv-zA-HJKMNP-TV-Z]{25}`, names)
 }
 
 // WhereIn adds an allowed values constraint to a resource parameter
-//.
+// .
 func (p *PendingResourceRegistration) WhereIn(name string, allowed []string) *PendingResourceRegistration {
 	return p.Where(map[string]string{name: strings.Join(allowed, "|")})
 }
@@ -363,7 +363,7 @@ func (p *PendingResourceRegistration) Missing(callback func(req *Request, err er
 }
 
 // Scoped enables scoped child model bindings on nested resource routes
-//. Optionally accepts field mappings.
+// . Optionally accepts field mappings.
 func (p *PendingResourceRegistration) Scoped(fields ...map[string]string) *PendingResourceRegistration {
 	p.options.Scoped = true
 	if len(fields) > 0 && fields[0] != nil {
@@ -378,7 +378,7 @@ func (p *PendingResourceRegistration) Scoped(fields ...map[string]string) *Pendi
 }
 
 // Metadata associates metadata with each generated resource route
-//.
+// .
 func (p *PendingResourceRegistration) Metadata(metadata map[string]any) *PendingResourceRegistration {
 	if p.options.Metadata == nil {
 		p.options.Metadata = make(map[string]any)
@@ -743,7 +743,7 @@ func isNestedResource(name string) bool {
 }
 
 // irregularPlurals maps common irregular English plurals to their singular form
-//.
+// .
 var irregularPlurals = map[string]string{
 	"categories": "category",
 	"queries":    "query",
@@ -762,7 +762,7 @@ var irregularPlurals = map[string]string{
 }
 
 // GetResourceWildcard returns the singular form of a resource name
-//.
+// .
 func GetResourceWildcard(name string) string {
 	return singularize(name, nil, true)
 }

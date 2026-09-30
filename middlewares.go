@@ -264,12 +264,12 @@ func (h *TrimStringsMiddleware) isExcepted(key string) bool {
 
 // --- Begin validate_signature.go ---
 // signatureNeverValidate holds the globally ignored parameter names
-//, merged into every
+// , merged into every
 // validation at process time.
 var signatureNeverValidate []string
 
 // ValidateSignatureMiddleware validates signed URLs
-//. Validation is absolute unless the
+// . Validation is absolute unless the
 // middleware was built for relative URLs.
 type ValidateSignatureMiddleware struct {
 	generator *UrlGenerator
@@ -286,7 +286,7 @@ func NewValidateSignatureMiddleware(ug *UrlGenerator) Handler {
 
 // ValidateSignatureAbsolute returns signature middleware validating the
 // absolute URL while ignoring the given parameters
-//.
+// .
 func ValidateSignatureAbsolute(ug *UrlGenerator, ignore ...string) Middleware {
 	return (&ValidateSignatureMiddleware{generator: ug, ignore: ignore}).process
 }
@@ -321,7 +321,7 @@ func (h *ValidateSignatureMiddleware) Process(req *Request, next Closure) interf
 
 // process runs the actual validation: absolute by default, relative when the
 // middleware was built with ValidateSignatureRelative
-//).
+// ).
 // A failed validation throws InvalidSignatureException, which renders as a 403
 // "Invalid signature." response — here the InvalidSignatureError is built and
 // rendered through its Render method.
@@ -349,7 +349,7 @@ func (h *ValidateSignatureMiddleware) isValid(req *Request) bool {
 }
 
 // mergedIgnore merges the instance ignore list with the global except table
-//.
+// .
 func (h *ValidateSignatureMiddleware) mergedIgnore() []string {
 	ignore := make([]string, 0, len(h.ignore)+len(signatureNeverValidate))
 	ignore = append(ignore, h.ignore...)
@@ -358,7 +358,7 @@ func (h *ValidateSignatureMiddleware) mergedIgnore() []string {
 }
 
 // appendMissing appends values not yet present, keeping the table unique
-//))).
+// ))).
 func appendMissing(values []string, additions ...string) []string {
 	for _, addition := range additions {
 		found := false

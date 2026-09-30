@@ -14,7 +14,7 @@ type RouteValidator interface {
 }
 
 // UriValidator checks the request path against the compiled pattern
-//.
+// .
 type UriValidator struct{}
 
 // Matches implements RouteValidator. the reference implementation matches
@@ -39,7 +39,7 @@ func (UriValidator) Matches(route *Route, request *Request) bool {
 }
 
 // MethodValidator checks the HTTP verb against the route methods
-//.
+// .
 type MethodValidator struct{}
 
 // Matches implements RouteValidator.
@@ -48,7 +48,7 @@ func (MethodValidator) Matches(route *Route, request *Request) bool {
 }
 
 // SchemeValidator checks the http/https requirement of the route
-//.
+// .
 type SchemeValidator struct{}
 
 // Matches implements RouteValidator.

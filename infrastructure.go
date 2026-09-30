@@ -1,15 +1,15 @@
 package flow
 
 import (
-	"sort"
 	"context"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 )
 
 // SortMiddleware stably orders middleware entries by a priority list
-//. The algorithm replicates the reference implementation: only string
+// . The algorithm replicates the reference implementation: only string
 // entries participate, the ":params" suffix is stripped before lookup, entries
 // missing from the priority list keep their original position, and an
 // out-of-order entry is moved above the previously ranked one. The result is
@@ -107,7 +107,7 @@ func moveMiddleware(middlewares []any, from, to int) []any {
 }
 
 // RouteAction parses and normalizes route actions
-//.
+// .
 type RouteAction struct{}
 
 // Parse normalizes an action value: strings become ControllerAction, other
@@ -159,7 +159,7 @@ func ParseRouteUri(uri string) RouteUri {
 }
 
 // RouteParameterBinder binds route parameters from a request path
-//.
+// .
 type RouteParameterBinder struct {
 	route *Route
 }
@@ -172,7 +172,7 @@ func NewRouteParameterBinder(route *Route) *RouteParameterBinder {
 // Parameters extracts the route parameters: path parameters first, then host
 // parameters when the route has a dynamic domain (host entries precede path
 // entries, the reference implementation: bindHostParameters), then defaults fill anything missing
-//. Empty matches are dropped like matchToKeys.
+// . Empty matches are dropped like matchToKeys.
 func (b *RouteParameterBinder) Parameters(req *Request) []*parameter {
 	b.route.compile()
 
@@ -273,7 +273,7 @@ func (b *RouteParameterBinder) Parameters(req *Request) []*parameter {
 }
 
 // ImplicitRouteBinding resolves implicit model bindings for a route
-//.
+// .
 type ImplicitRouteBinding struct {
 	route *Route
 }
@@ -291,11 +291,11 @@ func (ib *ImplicitRouteBinding) ResolveForRoute(request *Request, params []*para
 }
 
 // RouteBinding provides explicit binding registration helpers
-//.
+// .
 type RouteBinding struct{}
 
 // ForCallback returns a Binder that invokes the given callback
-//.
+// .
 func ForCallback(fn func(value string, route *Route) (any, error)) Binder {
 	return Binder(fn)
 }
@@ -315,7 +315,7 @@ func ForModelOfClass(className string, resolver func(ctx context.Context, value 
 }
 
 // ForModel returns a Binder that resolves a model instance via Routable
-//. Soft-deleted records are resolved through
+// . Soft-deleted records are resolved through
 // SoftDeletableRoutable when the route allows trashed bindings, and a missing
 // entity surfaces as *ModelNotFoundError like the reference modelNotFoundException.
 func ForModel(model Routable) Binder {
@@ -336,7 +336,7 @@ func ForModel(model Routable) Binder {
 }
 
 // ControllerMiddlewareOptions provides fluent only/except filters
-//.
+// .
 type ControllerMiddlewareOptions struct {
 	OnlyMethods   []string
 	ExceptMethods []string

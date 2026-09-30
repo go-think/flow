@@ -71,7 +71,7 @@ func splitAliasParams(name string) (string, string) {
 }
 
 // isClosureValue reports whether the middleware entry is a closure/func value
-//.
+// .
 func isClosureValue(v any) bool {
 	return v != nil && reflect.ValueOf(v).Kind() == reflect.Func
 }

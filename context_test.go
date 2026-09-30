@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -117,6 +118,47 @@ func TestFileMovePathTraversalProtection(t *testing.T) {
 
 	// Ensure path is cleaned by filepath.Base and exists in uploads directory, preventing path traversal
 	assert.FileExists(t, filepath.Join(targetDir, "malicious.txt"))
+}
+
+func TestFileMethodsAndMultiFileUploads(t *testing.T) {
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Create single file
+	part1, err := writer.CreateFormFile("avatar", "profile.png")
+	assert.NoError(t, err)
+	_, _ = part1.Write([]byte("image-data-bytes"))
+
+	// Create multi files
+	part2, err := writer.CreateFormFile("photos", "photo1.jpg")
+	assert.NoError(t, err)
+	_, _ = part2.Write([]byte("photo-one"))
+
+	part3, err := writer.CreateFormFile("photos", "photo2.jpg")
+	assert.NoError(t, err)
+	_, _ = part3.Write([]byte("photo-two"))
+
+	_ = writer.Close()
+
+	httpReq, _ := http.NewRequest("POST", "/upload", body)
+	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
+	req := NewRequest(httpReq)
+
+	// Single file tests
+	avatar, err := req.File("avatar")
+	assert.NoError(t, err)
+	assert.Equal(t, "profile.png", avatar.Filename())
+	assert.Equal(t, "png", avatar.Extension())
+	assert.Equal(t, int64(16), avatar.Size())
+	assert.True(t, avatar.IsValid())
+
+	// Multi-files test
+	photos := req.Files("photos")
+	assert.Len(t, photos, 2)
+	assert.Equal(t, "photo1.jpg", photos[0].Filename())
+	assert.Equal(t, "jpg", photos[0].Extension())
+	assert.Equal(t, "photo2.jpg", photos[1].Filename())
+	assert.Equal(t, "jpg", photos[1].Extension())
 }
 
 func TestConcurrentSetAndGet(t *testing.T) {
@@ -228,6 +270,92 @@ func TestRequestPathAndUrlMethods(t *testing.T) {
 	withoutQuery := r.FullUrlWithoutQuery("sort")
 	assert.NotContains(t, withoutQuery, "sort=")
 	assert.Contains(t, withoutQuery, "page=1")
+
+	// 5. FullUrl without query shouldn't have trailing ?
+	cleanReq := NewRequest(httptest.NewRequest("GET", "http://example.com:8080/users", nil))
+	assert.Equal(t, "/users", cleanReq.Url())
+	assert.Equal(t, "/users", cleanReq.FullUrl())
+	assert.Equal(t, "/users", cleanReq.FullUrlWithQuery(map[string]string{}))
+
+	// 6. Request inspection helpers
+	cleanReq.Request.Header.Set("Authorization", "Bearer my-token")
+	cleanReq.Request.Header.Set("Content-Type", "application/json; charset=utf-8")
+	cleanReq.Request.Header.Set("X-Forwarded-Proto", "https")
+	cleanReq.Request.Header.Set("Accept", "text/html,application/json;q=0.9")
+	assert.True(t, cleanReq.HasHeader("Authorization"))
+	assert.False(t, cleanReq.HasHeader("X-Non-Existent"))
+	assert.True(t, cleanReq.IsJson())
+	assert.Equal(t, "example.com:8080", cleanReq.Host())
+	assert.Equal(t, "https", cleanReq.Scheme())
+	assert.True(t, cleanReq.Secure())
+	assert.NotEmpty(t, cleanReq.IP())
+	assert.Equal(t, cleanReq.IP(), cleanReq.Ip())
+
+	// 7. RouteParams snapshot
+	cleanReq.SetRouteParam("id", "123")
+	cleanReq.SetRouteParam("slug", "hello-world")
+	params := cleanReq.RouteParams()
+	assert.Equal(t, "123", params["id"])
+	assert.Equal(t, "hello-world", params["slug"])
+
+	// 8. Content negotiation (Accepts & Prefers)
+	assert.True(t, cleanReq.Accepts("text/html"))
+	assert.True(t, cleanReq.Accepts("application/json"))
+	assert.False(t, cleanReq.Accepts("application/xml"))
+	assert.Equal(t, "text/html", cleanReq.Prefers("text/html", "application/json"))
+
+	// 9. JSON binding & dot-notation access
+	jsonBody := `{"user": {"name": "Bob", "age": 30}, "created_at": "2026-09-30T10:00:00Z"}`
+	jsonReq := NewRequest(httptest.NewRequest("POST", "/api/user", strings.NewReader(jsonBody)))
+	jsonReq.Request.Header.Set("Content-Type", "application/json")
+
+	type userDTO struct {
+		User struct {
+			Name string `json:"name"`
+			Age  int    `json:"age"`
+		} `json:"user"`
+	}
+	var dto userDTO
+	err := jsonReq.BindJson(&dto)
+	assert.NoError(t, err)
+	assert.Equal(t, "Bob", dto.User.Name)
+	assert.Equal(t, 30, dto.User.Age)
+	assert.Equal(t, "Bob", jsonReq.Json("user.name"))
+	assert.Equal(t, float64(30), jsonReq.Json("user.age"))
+	assert.Nil(t, jsonReq.Json("user.non_existent"))
+
+	// 10. Date parsing
+	tVal, err := jsonReq.Date("created_at")
+	assert.NoError(t, err)
+	assert.Equal(t, 2026, tVal.Year())
+
+	// 11. WhenFilled & WhenHas
+	filledCalled := false
+	jsonReq.WhenFilled("created_at", func(val string) {
+		filledCalled = true
+		assert.NotEmpty(t, val)
+	})
+	assert.True(t, filledCalled)
+
+	hasCalled := false
+	jsonReq.WhenHas("created_at", func(val string) {
+		hasCalled = true
+	})
+	assert.True(t, hasCalled)
+
+	// 12. Response WithHeaders, WithCookie, WithoutCookie
+	res := NewResponse()
+	res.WithHeaders(map[string]string{
+		"X-Custom-1": "val1",
+		"X-Custom-2": "val2",
+	})
+	assert.Equal(t, "val1", res.Headers().Get("X-Custom-1"))
+	assert.Equal(t, "val2", res.Headers().Get("X-Custom-2"))
+
+	res.WithCookie(&http.Cookie{Name: "session", Value: "abc"})
+	assert.Equal(t, "abc", res.GetCookies()["session"].Value)
+	res.WithoutCookie("session")
+	assert.Equal(t, -1, res.GetCookies()["session"].MaxAge)
 }
 
 // --- End context_test.go ---

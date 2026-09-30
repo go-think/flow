@@ -14,7 +14,7 @@ const intendedURLKey = "url.intended"
 
 // UrlGenerationError reports that a named route URL could not be generated
 // because required parameters were missing
-//.
+// .
 type UrlGenerationError struct {
 	RouteName string
 	RouteURI  string
@@ -105,7 +105,7 @@ func (r *Redirector) WithHeaders(headers map[string]string) *Redirector {
 }
 
 // createRedirect centralizes redirect response construction
-//: the status code and Location are set
+// : the status code and Location are set
 // through the shared Redirect factory, the redirector's headers are stamped
 // on, and the current request is attached when available.
 func (r *Redirector) createRedirect(path string, status int) *Response {
@@ -126,7 +126,7 @@ func (r *Redirector) To(path string, status ...int) *Response {
 }
 
 // Away redirects to an external URL without any normalization
-//.
+// .
 func (r *Redirector) Away(url string, status ...int) *Response {
 	return r.createRedirect(url, redirectStatus(status))
 }
@@ -220,7 +220,7 @@ func (r *Redirector) Secure(path string, status ...int) *Response {
 }
 
 // GetIntendedUrl reads the intended redirect URL from the session
-//.
+// .
 func (r *Redirector) GetIntendedUrl() string {
 	req := r.currentRequest()
 	if req == nil {
@@ -297,7 +297,7 @@ func (r *Redirector) pullIntendedUrl(s session.Session, fallback string) string 
 }
 
 // SetIntendedUrl records the URL to redirect to after interception
-//.
+// .
 func (r *Redirector) SetIntendedUrl(url string) {
 	req := r.currentRequest()
 	if req == nil {

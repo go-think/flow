@@ -13,9 +13,16 @@ type Handler interface {
 	Process(request *Request, next Closure) any
 }
 
+// ExceptionHandler defines the contract for handling exceptions within the pipeline.
+type ExceptionHandler interface {
+	Report(err any)
+	Render(req *Request, err any) any
+}
+
 type Pipeline struct {
-	passable *Request
-	handlers []Handler
+	passable         *Request
+	handlers         []Handler
+	exceptionHandler ExceptionHandler
 }
 
 // NewPipeline returns a new Pipeline
@@ -23,6 +30,12 @@ func NewPipeline() *Pipeline {
 	return &Pipeline{
 		handlers: make([]Handler, 0),
 	}
+}
+
+// WithExceptionHandler sets the exception handler for this pipeline run.
+func (p *Pipeline) WithExceptionHandler(handler ExceptionHandler) *Pipeline {
+	p.exceptionHandler = handler
+	return p
 }
 
 // Send sets the object being sent through the pipeline. Like the reference implementation
@@ -58,26 +71,50 @@ func (p *Pipeline) ThenReturn() any {
 	})
 }
 
-func (p *Pipeline) dispatch(index int, req *Request, destination Closure) any {
+// handleCarry converts a Responsable result to a Response.
+func (p *Pipeline) handleCarry(req *Request, result any) any {
+	if responsable, ok := result.(Responsable); ok {
+		return responsable.ToResponse(req)
+	}
+	return result
+}
+
+// handleException handles an exception occurring within a pipe slice.
+func (p *Pipeline) handleException(req *Request, e any) any {
+	if p.exceptionHandler == nil {
+		panic(e)
+	}
+	p.exceptionHandler.Report(e)
+	response := p.exceptionHandler.Render(req, e)
+	return p.handleCarry(req, response)
+}
+
+func (p *Pipeline) dispatch(index int, req *Request, destination Closure) (result any) {
 	if index >= len(p.handlers) {
 		if destination != nil {
+			if p.exceptionHandler != nil {
+				defer func() {
+					if rec := recover(); rec != nil {
+						result = p.handleException(req, rec)
+					}
+				}()
+			}
 			return destination(req)
 		}
 		return nil
 	}
 	handler := p.handlers[index]
-	result := handler.Process(req, func(nextReq *Request) any {
+	if p.exceptionHandler != nil {
+		defer func() {
+			if rec := recover(); rec != nil {
+				result = p.handleException(req, rec)
+			}
+		}()
+	}
+	raw := handler.Process(req, func(nextReq *Request) any {
 		return p.dispatch(index+1, nextReq, destination)
 	})
-	// A Responsable pipe result is converted into a response before being
-	// handed back (the reference implementation: —
-	// a Responsable result is converted through ToResponse).
-	// Responsable is defined in router.go alongside the response preparation
-	// that shares the contract.
-	if responsable, ok := result.(Responsable); ok {
-		return responsable.ToResponse(req)
-	}
-	return result
+	return p.handleCarry(req, raw)
 }
 
 // ServeHTTP Implement http.Handler safely

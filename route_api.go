@@ -39,7 +39,7 @@ func (r *Route) SetAction(handler any) *Route {
 }
 
 // GetActionName returns the canonical action identifier
-//.
+// .
 func (r *Route) GetActionName() string {
 	if r == nil || r.handler == nil {
 		return "Closure"
@@ -57,7 +57,7 @@ func (r *Route) GetActionName() string {
 }
 
 // GetActionMethod returns the method name of the route action
-//.
+// .
 func (r *Route) GetActionMethod() string {
 	if r == nil || r.handler == nil {
 		return "Closure"
@@ -178,7 +178,7 @@ func typeImplements(t reflect.Type, interfaceName string) bool {
 
 // ParentOfParameter returns the route parameter that precedes the given
 // parameter in the URI (nested resource parent), or "" when none
-//.
+// .
 func (r *Route) ParentOfParameter(name string) string {
 	names := r.ParameterNames()
 	for i, n := range names {
@@ -206,7 +206,7 @@ func (r *Route) GetOptionalParameterNames() []string {
 }
 
 // WithoutScopedBindings marks the route as NOT enforcing scoped bindings
-//. The last scope decision wins.
+// . The last scope decision wins.
 func (r *Route) WithoutScopedBindings() *Route {
 	r.scopedBindings = false
 	r.scopedDisabled = true
@@ -280,7 +280,7 @@ func (r *Route) FlushController() {
 }
 
 // GetControllerClass returns the controller class name for a controller action
-//.
+// .
 func (r *Route) GetControllerClass() string {
 	if r == nil {
 		return ""
@@ -298,6 +298,16 @@ func (r *Route) GetControllerClass() string {
 func (r *Route) SetRouter(router *router) *Route {
 	r.router = router
 	return r
+}
+
+// Router returns the owning router instance.
+func (r *Route) Router() Router {
+	return r.router
+}
+
+// GetRouter returns the owning router instance.
+func (r *Route) GetRouter() Router {
+	return r.router
 }
 
 // SetContainer is the the reference implementation-compatible alias for SetRouter (the router
@@ -321,7 +331,7 @@ func (r *Route) OriginalParameter(request *Request, name string, defaultValue ..
 }
 
 // OriginalParameters returns the raw route parameters snapshot
-//.
+// .
 func (r *Route) OriginalParameters(request *Request) map[string]string {
 	if request == nil {
 		return map[string]string{}
@@ -343,7 +353,7 @@ func (r *Route) ParametersWithoutNulls(request *Request) map[string]string {
 }
 
 // SetParameter overrides a route parameter value at runtime
-//.
+// .
 func (r *Route) SetParameter(request *Request, name string, value string) *Route {
 	if request != nil {
 		request.SetRouteParam(name, value)
@@ -352,7 +362,7 @@ func (r *Route) SetParameter(request *Request, name string, value string) *Route
 }
 
 // SetParameterValue stores an object value for a route parameter
-//. The object is kept on the
+// . The object is kept on the
 // request and consumed by the dispatcher.
 func (r *Route) SetParameterValue(request *Request, name string, value any) *Route {
 	if request != nil {
@@ -370,7 +380,7 @@ func (r *Route) ForgetParameter(request *Request, name string) *Route {
 }
 
 // ControllerDispatcher returns the dispatcher from the owning router
-//.
+// .
 func (r *Route) ControllerDispatcher() ControllerDispatcher {
 	if r.router != nil {
 		return r.router.getControllerDispatcher()

@@ -360,7 +360,9 @@ func (u *UrlGenerator) routeEntity(name string) *Route {
 	switch src := u.routes.(type) {
 	case *RouteCollection:
 		return src.GetByName(name)
-	case interface{ Routes() RouteCollectionInterface }:
+	case interface {
+		Routes() RouteCollectionInterface
+	}:
 		if rc := src.Routes(); rc != nil {
 			return rc.GetByName(name)
 		}
@@ -436,7 +438,7 @@ func (u *UrlGenerator) currentRequest() *Request {
 }
 
 // GetRequest returns the request currently bound to the generator
-//, or nil when no request provider is configured.
+// , or nil when no request provider is configured.
 func (u *UrlGenerator) GetRequest() *Request {
 	return u.currentRequest()
 }
@@ -542,7 +544,7 @@ func splitQueryString(path string) (string, string) {
 // mergeQueryPairs merges new query parameters over the pairs parsed from an
 // existing raw query string: existing pair order is preserved (values are
 // overridden in place) and new keys are appended in sorted order
-//).
+// ).
 func mergeQueryPairs(rawQuery string, query map[string]string) []queryPair {
 	var pairs []queryPair
 	index := make(map[string]int)
@@ -846,7 +848,7 @@ func (u *UrlGenerator) HasValidSignatureAbsolute(req *Request) bool {
 }
 
 // HasValidRelativeSignature checks the signature using the relative path only
-//.
+// .
 func (u *UrlGenerator) HasValidRelativeSignature(req *Request, ignore ...string) bool {
 	return u.hasValidSignature(req, false, ignore)
 }
@@ -860,7 +862,7 @@ func (u *UrlGenerator) HasValidSignatureWhileIgnoring(req *Request, ignore ...st
 }
 
 // hasValidSignature combines the HMAC check with the expiry check
-//.
+// .
 func (u *UrlGenerator) hasValidSignature(req *Request, absolute bool, ignore []string) bool {
 	if !u.correctSignature(req, absolute, ignore) {
 		return false
@@ -869,7 +871,7 @@ func (u *UrlGenerator) hasValidSignature(req *Request, absolute bool, ignore []s
 }
 
 // HasCorrectSignature checks only the HMAC hash, not the expiry
-//. The signature is verified against the
+// . The signature is verified against the
 // absolute request URL unless absolute is false.
 func (u *UrlGenerator) HasCorrectSignature(req *Request, absolute ...bool) bool {
 	isAbsolute := true
@@ -904,7 +906,7 @@ func (u *UrlGenerator) correctSignature(req *Request, absolute bool, ignore []st
 }
 
 // SignatureHasNotExpired checks only the expires parameter
-//. An absent expires parameter
+// . An absent expires parameter
 // never expires; so does "0" (and ""), the PHP falsy values in
 // `!(expires && now > expires)`. "0.0" is truthy: it compares
 // numerically as 0, `now > 0.0` holds, and the URL counts as expired. The same
@@ -1016,7 +1018,7 @@ func signHMAC(payload, key string) string {
 }
 
 // ForceScheme forces the URL scheme for all generated URLs
-//. the reference implementation concatenates literally, so
+// . the reference implementation concatenates literally, so
 // a bare "https" and a suffixed "https://" must both work; the Go equivalent
 // appends "://" only when the value does not already contain it (a literal
 // concatenation would produce the unusable "https://://").
@@ -1039,7 +1041,7 @@ func normalizeScheme(scheme string) string {
 }
 
 // ForceHttps forces the HTTPS scheme for all generated URLs
-//. Passing false leaves the current scheme untouched,
+// . Passing false leaves the current scheme untouched,
 // mirroring the the reference implementation implementation.
 func (u *UrlGenerator) ForceHttps(force ...bool) *UrlGenerator {
 	should := true
@@ -1053,7 +1055,7 @@ func (u *UrlGenerator) ForceHttps(force ...bool) *UrlGenerator {
 }
 
 // ForceRootURL forces the root URL for all generated URLs
-//. An empty root releases the force.
+// . An empty root releases the force.
 func (u *UrlGenerator) ForceRootURL(root string) *UrlGenerator {
 	if u == nil {
 		return u
@@ -1067,7 +1069,7 @@ func (u *UrlGenerator) ForceRootURL(root string) *UrlGenerator {
 }
 
 // UseOrigin sets the URL origin for all generated URLs
-//. Alias of ForceRootURL.
+// . Alias of ForceRootURL.
 func (u *UrlGenerator) UseOrigin(root string) *UrlGenerator {
 	return u.ForceRootURL(root)
 }
@@ -1079,7 +1081,7 @@ func (u *UrlGenerator) UseAssetOrigin(origin string) *UrlGenerator {
 }
 
 // Asset resolves an asset path against the asset origin or base URL
-//. Valid URLs are returned unchanged; the path
+// . Valid URLs are returned unchanged; the path
 // is trimmed on both sides; the origin falls back to formatRoot built on the
 // request scheme (http:// or https:// per TLS / X-Forwarded-Proto, or the
 // secure override).
@@ -1099,13 +1101,13 @@ func (u *UrlGenerator) Asset(path string, secure ...bool) string {
 }
 
 // SecureAsset resolves an asset path with HTTPS
-//).
+// ).
 func (u *UrlGenerator) SecureAsset(path string) string {
 	return u.Asset(path, true)
 }
 
 // AssetFrom resolves an asset path from a custom root such as a CDN
-//. The root runs through formatRoot with the
+// . The root runs through formatRoot with the
 // resolved scheme, then the trimmed path is appended.
 func (u *UrlGenerator) AssetFrom(root, path string, secure ...bool) string {
 	var secureFlag *bool
@@ -1148,7 +1150,7 @@ func (u *UrlGenerator) removeIndex(root string) string {
 
 // Query builds the absolute URL for a path with the given query parameters
 // merged over any query string already present in the path (the reference implementation: query,
-//). Existing pair order is preserved and values from query
+// ). Existing pair order is preserved and values from query
 // override existing ones in place. Divergence note: the reference implementation appends NEW keys
 // in array_merge insertion order; Go maps have no stable order, so new keys
 // are appended sorted to keep URLs deterministic. Trailing '?' characters are
@@ -1165,7 +1167,7 @@ func (u *UrlGenerator) Query(path string, query map[string]string, extra ...stri
 }
 
 // Secure generates an absolute HTTPS URL for the given path
-//,): the variadic parameters
+// ,): the variadic parameters
 // become extra rawurlencoded path tail segments appended after the path.
 func (u *UrlGenerator) Secure(path string, parameters ...string) string {
 	secure := true
@@ -1180,7 +1182,7 @@ func (u *UrlGenerator) WithKeyResolver(fn func() []string) *UrlGenerator {
 }
 
 // GetRootControllerNamespace returns the root controller namespace
-//.
+// .
 func (u *UrlGenerator) GetRootControllerNamespace() string {
 	return u.rootControllerNamespace
 }
@@ -1193,7 +1195,7 @@ func (u *UrlGenerator) SetRootControllerNamespace(ns string) *UrlGenerator {
 }
 
 // formatScheme resolves the default scheme with a "://" suffix
-//. An explicit secure value wins, then the forced
+// . An explicit secure value wins, then the forced
 // scheme, then the current request's scheme, defaulting to http.
 func (u *UrlGenerator) formatScheme(secure *bool) string {
 	if secure != nil {
@@ -1228,7 +1230,7 @@ func (u *UrlGenerator) requestScheme(req *Request) string {
 
 // requestRoot returns scheme://host for the given request. Non-standard ports
 // are kept; the standard port for the scheme (80/443) is stripped
-//. An empty result means no root is known.
+// . An empty result means no root is known.
 func (u *UrlGenerator) requestRoot(req *Request) string {
 	httpReq := req.GetHttpRequest()
 	if httpReq == nil || httpReq.Host == "" {
@@ -1246,7 +1248,7 @@ func (u *UrlGenerator) requestRoot(req *Request) string {
 }
 
 // FormatRoot formats the root URL with the given scheme
-//,). The scheme may be
+// ,). The scheme may be
 // given bare ("https") or with its "://" suffix; when root is empty it
 // defaults to the forced root URL / base URL and then the current request,
 // and its scheme prefix is replaced with the given scheme. Non-standard ports
@@ -1280,7 +1282,7 @@ func (u *UrlGenerator) formatRoot(scheme, root string) string {
 }
 
 // Format formats a root URL and path into a complete URL
-//. The path is normalized to '/'+trim(path,'/')
+// . The path is normalized to '/'+trim(path,'/')
 // FIRST and the normalized path is what the path formatter callback receives;
 // the host formatter runs on the root. The result is trim(root.path, '/'): an
 // empty root yields the normalized path WITHOUT its leading slash, exactly
@@ -1295,14 +1297,14 @@ func (u *UrlGenerator) Format(root, path string) string {
 }
 
 // SetHostFormatter sets a custom host formatting callback
-//.
+// .
 func (u *UrlGenerator) SetHostFormatter(fn func(host string) string) *UrlGenerator {
 	u.hostFormatter = fn
 	return u
 }
 
 // SetPathFormatter sets a custom path formatting callback
-//.
+// .
 func (u *UrlGenerator) SetPathFormatter(fn func(path string) string) *UrlGenerator {
 	u.pathFormatter = fn
 	return u

@@ -13,20 +13,26 @@ import (
 
 // ═══ Router 补齐 ═══
 
-// RespondWithRoute dispatches a request by route name
-//.
+// RespondWithRoute dispatches a request to a route resolved by its name.
 func (r *router) RespondWithRoute(name string, request *Request) *Response {
-	pattern, ok := r.NamedRoutePattern(name)
-	if !ok {
+	root := r.root()
+	root.flushPending()
+	route := root.collection.GetByName(name)
+	if route == nil {
 		return NotFoundResponse()
 	}
-	req := NewRequest(request.Request)
-	req.SetPath(pattern)
-	return r.Dispatch(req)
+	if request == nil {
+		request = root.CurrentRequest()
+	}
+	if request == nil {
+		return NotFoundResponse()
+	}
+	params := route.Bind(request, request.Path())
+	return root.runRoute(request, route, params)
 }
 
 // GetValidators returns the default validator chain
-//.
+// .
 func (r *router) GetValidators() []RouteValidator {
 	return defaultValidators()
 }
@@ -40,7 +46,7 @@ func (r *Route) GetValidators() []RouteValidator {
 }
 
 // GetCompiled returns the compiled match patterns of this route
-//.
+// .
 func (r *Route) GetCompiled() []*compiledPattern {
 	r.compile()
 	return r.expanded
@@ -82,7 +88,7 @@ func (u *UrlGenerator) IsValidUrl(path string) bool {
 }
 
 // UrlRoutable is implemented by entities that expose their route key
-//. FormatParameters substitutes
+// . FormatParameters substitutes
 // such values with their route key.
 type UrlRoutable interface {
 	GetRouteKey() string
@@ -106,7 +112,7 @@ func (u *UrlGenerator) FormatParameters(params map[string]any) map[string]string
 }
 
 // AddPortToDomain adds the request's non-standard port to a route domain
-//. The port is omitted only
+// . The port is omitted only
 // when it is the standard port for the scheme (443 when secure, 80 when not)
 // or unknown (0).
 func AddPortToDomain(domain string, port int, secure bool) string {
@@ -255,7 +261,7 @@ func (u *UrlGenerator) ReplaceRouteParameters(path string, params map[string]str
 }
 
 // ReplaceNamedParameters replaces named parameters in a pattern
-//. Parameters are consumed in
+// . Parameters are consumed in
 // sorted key order (the reference implementation consumes in insertion order; Go maps are
 // unordered, so sorted order keeps the result deterministic). Placeholders
 // whose parameter is missing or empty fall back to the generator's default

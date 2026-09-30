@@ -55,7 +55,7 @@ type throttleLimit struct {
 }
 
 // ThrottleMiddleware limits request throughput per client key
-//.
+// .
 type ThrottleMiddleware struct {
 	limiter        RateLimiter
 	name           string // named limiter to resolve
@@ -80,7 +80,7 @@ func NewThrottleMiddleware(limiter RateLimiter, maxAttempts int, decay time.Dura
 // NewThrottleMiddlewareWith throttles using a string policy spec plus key
 // prefix. spec may be a plain number ("60") or a guest|user pair ("60|120" —
 // without an auth component the guest segment applies)
-//.
+// .
 func NewThrottleMiddlewareWith(limiter RateLimiter, spec string, decay time.Duration, prefix string) Handler {
 	return &ThrottleMiddleware{
 		limiter:        limiter,
@@ -92,7 +92,7 @@ func NewThrottleMiddlewareWith(limiter RateLimiter, spec string, decay time.Dura
 }
 
 // NewThrottleMiddlewareNamed throttles using a named limiter bucket
-//. When the name is registered on the
+// . When the name is registered on the
 // default registry its callback decides the policy. When the name is not
 // registered the request panics with MissingRateLimiterError — like the reference implementation,
 // where a non-numeric limiter reference is re-resolved in resolveMaxAttempts
@@ -111,14 +111,14 @@ func NewThrottleMiddlewareNamed(limiter RateLimiter, name string, maxAttempts in
 
 // NewNamedThrottleMiddleware creates a throttle middleware that resolves its
 // policy dynamically from the named rate limiter registry
-//. An unregistered name panics with
+// . An unregistered name panics with
 // MissingRateLimiterError.
 func NewNamedThrottleMiddleware(name string) Handler {
 	return &ThrottleMiddleware{name: name, shouldHashKeys: shouldHashThrottleKeys}
 }
 
 // ShouldHashKeys enables/disables hashing of throttle keys for this middleware
-//.
+// .
 func (h *ThrottleMiddleware) ShouldHashKeys(should bool) *ThrottleMiddleware {
 	h.shouldHashKeys = should
 	return h
@@ -127,6 +127,17 @@ func (h *ThrottleMiddleware) ShouldHashKeys(should bool) *ThrottleMiddleware {
 // Process implements Handler.
 func (h *ThrottleMiddleware) Process(req *Request, next Closure) any {
 	limiter := h.limiter
+	if limiter == nil {
+		if req != nil && req.Route() != nil && req.Route().Router() != nil {
+			if r, ok := req.Route().Router().(*router); ok && r.container != nil {
+				if r.container.Bound("rate.limiter") {
+					if cl, ok := r.container.Make("rate.limiter").(RateLimiter); ok {
+						limiter = cl
+					}
+				}
+			}
+		}
+	}
 	if limiter == nil {
 		limiter = defaultRateLimiterRegistry.backend
 	}
@@ -173,7 +184,7 @@ func (h *ThrottleMiddleware) Process(req *Request, next Closure) any {
 
 // handleRequestUsingNamedLimiter resolves the policy from a named limiter
 // callback, which may return *Limit, []*Limit, *Unlimited or *Response
-//.
+// .
 func (h *ThrottleMiddleware) handleRequestUsingNamedLimiter(req *Request, next Closure, limiter RateLimiter, limiterName string, limiterFn func(*Request) any) any {
 	result := limiterFn(req)
 
@@ -229,7 +240,7 @@ func (h *ThrottleMiddleware) namedBucketKey(limiterName, limitKey string) string
 
 // handleRequest checks every bucket before the request runs, counts the hits,
 // then runs after-callbacks and adds headers on the way out
-//.
+// .
 func (h *ThrottleMiddleware) handleRequest(req *Request, next Closure, limiter RateLimiter, limits []throttleLimit) any {
 	for i := range limits {
 		if limiter.TooManyAttempts(limits[i].key, limits[i].maxAttempts) {
@@ -256,7 +267,7 @@ func (h *ThrottleMiddleware) handleRequest(req *Request, next Closure, limiter R
 }
 
 // remainingAttempts calculates the attempts left for a key
-//.
+// .
 func (h *ThrottleMiddleware) remainingAttempts(limiter RateLimiter, key string, maxAttempts int) int {
 	remaining := maxAttempts - limiter.Attempts(key)
 	if remaining < 0 {
@@ -320,7 +331,7 @@ func (h *ThrottleMiddleware) resolveRequestSignature(req *Request) string {
 }
 
 // formatIdentifier hashes the identifier when key hashing is enabled
-//.
+// .
 func (h *ThrottleMiddleware) formatIdentifier(value string) string {
 	if !h.shouldHashKeys {
 		return value

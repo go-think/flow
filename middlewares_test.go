@@ -632,3 +632,32 @@ func TestMiddlewareNameResolver_StringAliasWithParamsStillResolves(t *testing.T)
 	require.NoError(t, err)
 	assert.Equal(t, []any{"App\\Throttle"}, got2)
 }
+
+type dummyTerminableMiddleware struct {
+	terminated bool
+}
+
+func (m *dummyTerminableMiddleware) Process(req *Request, next Closure) any {
+	return next(req)
+}
+
+func (m *dummyTerminableMiddleware) Terminate(req *Request, res any) {
+	m.terminated = true
+}
+
+func TestTerminableMiddleware(t *testing.T) {
+	r := New(nil, nil)
+	mw := &dummyTerminableMiddleware{}
+	r.Get("/terminable", func(req *Request) *Response {
+		return Text("ok")
+	}).Middleware(mw)
+	r.Register()
+
+	req := NewRequest(httptest.NewRequest("GET", "/terminable", nil))
+	res := r.Dispatch(req)
+	assert.Equal(t, "ok", res.GetContent())
+	assert.False(t, mw.terminated)
+
+	r.Terminate(req, res)
+	assert.True(t, mw.terminated)
+}

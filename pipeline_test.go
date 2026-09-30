@@ -277,7 +277,7 @@ func TestPipeline_SendMutatesInPlace(t *testing.T) {
 // --- Begin pipeline Responsable tests ---
 
 // testResponsable is a pipe result converted through the Responsable contract
-//.
+// .
 type testResponsable struct{ body string }
 
 func (r *testResponsable) ToResponse(request *Request) *Response {
@@ -301,4 +301,48 @@ func TestPipeline_ResponsablePipeResultConverted(t *testing.T) {
 	response, ok := res.(*Response)
 	assert.True(t, ok, "a Responsable pipe result must be converted to a *Response")
 	assert.Equal(t, "responsable:done", response.GetContent())
+}
+
+type testPipelineExceptionHandler struct {
+	reported []any
+}
+
+func (h *testPipelineExceptionHandler) Report(err any) {
+	h.reported = append(h.reported, err)
+}
+
+func (h *testPipelineExceptionHandler) Render(req *Request, err any) any {
+	return NewResponse().
+		SetCode(http.StatusInternalServerError).
+		SetContent(fmt.Sprintf("Handled: %v", err)).
+		Header("X-Exception-Handled", "true")
+}
+
+func TestPipelineExceptionHandler_PostMiddlewareObservesHandledResponse(t *testing.T) {
+	r := NewRouter(nil, nil)
+	handler := &testPipelineExceptionHandler{}
+	r.SetExceptionHandler(handler)
+
+	var outerPostRan bool
+
+	r.Middleware(func(req *Request, next Closure) any {
+		res := next(req)
+		outerPostRan = true
+		if resp, ok := res.(*Response); ok {
+			resp.Header("X-Outer-Post", "executed")
+		}
+		return res
+	}).Get("/crash", func() string {
+		panic(fmt.Errorf("fatal database connection lost"))
+	})
+
+	req := httptest.NewRequest("GET", "/crash", nil)
+	resp := r.Dispatch(req)
+
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode())
+	assert.Equal(t, "Handled: fatal database connection lost", resp.GetContent())
+	assert.Equal(t, "true", resp.Headers().Get("X-Exception-Handled"))
+	assert.True(t, outerPostRan)
+	assert.Equal(t, "executed", resp.Headers().Get("X-Outer-Post"))
+	assert.Equal(t, 1, len(handler.reported))
 }

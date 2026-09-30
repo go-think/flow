@@ -38,6 +38,35 @@ type ControllerMiddleware struct {
 	Except  []string
 }
 
+// MiddlewareDefinition defines a controller middleware with optional method filters.
+type MiddlewareDefinition struct {
+	Handler       any
+	OnlyMethods   []string
+	ExceptMethods []string
+}
+
+// NewMiddlewareDefinition creates a new MiddlewareDefinition for controller middleware.
+func NewMiddlewareDefinition(middleware any) *MiddlewareDefinition {
+	return &MiddlewareDefinition{Handler: middleware}
+}
+
+// Only specifies the only controller methods the middleware should apply to.
+func (m *MiddlewareDefinition) Only(methods ...string) *MiddlewareDefinition {
+	m.OnlyMethods = append(m.OnlyMethods, methods...)
+	return m
+}
+
+// Except specifies the controller methods the middleware should not apply to.
+func (m *MiddlewareDefinition) Except(methods ...string) *MiddlewareDefinition {
+	m.ExceptMethods = append(m.ExceptMethods, methods...)
+	return m
+}
+
+// HasMiddleware is the interface for controller middleware configuration.
+type HasMiddleware interface {
+	Middleware() []*MiddlewareDefinition
+}
+
 // ControllerDispatcher dispatches a controller method with dependency
 // injection (route parameters first, container dependencies by type).
 type ControllerDispatcher interface {
@@ -120,7 +149,20 @@ func (d *controllerDispatcher) resolveController(action ControllerAction) (any, 
 }
 
 // GetMiddleware returns the middleware the controller declares for a method.
+// It supports both HasMiddleware and the legacy Controller interface.
 func (d *controllerDispatcher) GetMiddleware(controller any, method string) []any {
+	if hm, ok := controller.(HasMiddleware); ok {
+		var out []any
+		for _, m := range hm.Middleware() {
+			if m == nil {
+				continue
+			}
+			if middlewareDefinitionApplies(m, method) {
+				out = append(out, m.Handler)
+			}
+		}
+		return out
+	}
 	cm, ok := controller.(Controller)
 	if !ok {
 		return nil
@@ -132,6 +174,16 @@ func (d *controllerDispatcher) GetMiddleware(controller any, method string) []an
 		}
 	}
 	return out
+}
+
+func middlewareDefinitionApplies(m *MiddlewareDefinition, method string) bool {
+	if len(m.OnlyMethods) > 0 && !containsString(m.OnlyMethods, method) {
+		return false
+	}
+	if len(m.ExceptMethods) > 0 && containsString(m.ExceptMethods, method) {
+		return false
+	}
+	return true
 }
 
 // controllerMiddlewareApplies checks the Only/Except filters of a controller
@@ -165,6 +217,9 @@ func containsString(list []string, s string) bool {
 // for the default method at registration time, like the reference implementation validates
 // an invoke-method existence check at registration time.
 func parseControllerAction(handler any) any {
+	if ca, ok := handler.(*ControllerAction); ok && ca != nil {
+		return *ca
+	}
 	if s, ok := handler.(string); ok {
 		name, method := s, "Invoke"
 		if idx := strings.Index(s, "@"); idx != -1 {

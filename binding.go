@@ -29,7 +29,7 @@ type ScopedRoutable interface {
 
 // ScopedSoftDeletableRoutable is the soft-delete aware variant of scoped
 // binding, used when the route allows trashed bindings
-//.
+// .
 type ScopedSoftDeletableRoutable interface {
 	ResolveSoftDeletableChildRouteBinding(ctx context.Context, childType string, value string, field string) (any, error)
 }
@@ -195,7 +195,7 @@ func resolveScopedParent(parent ScopedRoutable, route *Route, ctx context.Contex
 }
 
 // hasBindingField reports whether the parameter declares a binding field
-//)).
+// )).
 func (r *Route) hasBindingField(name string) bool {
 	_, ok := r.bindingFields[name]
 	return ok
@@ -220,4 +220,19 @@ func toStringValue(value any) string {
 		return s
 	}
 	return fmt.Sprintf("%v", value)
+}
+
+// BindModel registers a type-safe model binder using Go generics.
+// When a route matching {key} is dispatched, resolver is called with the request context
+// and the parameter string, and the returned model is bound to the route parameter.
+func BindModel[T any](r Router, key string, resolver func(ctx context.Context, value string) (T, error)) {
+	r.Bind(key, func(value string, route *Route) (any, error) {
+		ctx := context.Background()
+		if route != nil && route.router != nil {
+			if req := route.router.CurrentRequest(); req != nil {
+				ctx = req.Context()
+			}
+		}
+		return resolver(ctx, value)
+	})
 }

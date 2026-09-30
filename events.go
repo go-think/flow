@@ -69,7 +69,7 @@ func (e *StreamedResponseError) Unwrap() error {
 }
 
 // Render converts the streamed error into a 500 response
-//.
+// .
 func (e *StreamedResponseError) Render() *Response {
 	return NewResponse().SetCode(500).SetContent("Streamed response failed")
 }
@@ -91,7 +91,7 @@ func (e *MissingRateLimiterError) Error() string {
 }
 
 // ForLimiter creates a MissingRateLimiterError for a named limiter
-//.
+// .
 func ForMissingRateLimiter(limiter string) *MissingRateLimiterError {
 	return &MissingRateLimiterError{Limiter: limiter}
 }

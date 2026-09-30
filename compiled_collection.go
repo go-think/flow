@@ -38,11 +38,12 @@ var _ RouteCollectionInterface = (*CompiledRouteCollection)(nil)
 // - matching consults the cached routes first, with the request path's
 // trailing slashes trimmed (requestWithoutTrailingSlash — only cached
 // matching trims);
-// - a cached miss or verb mismatch delegates to the dynamic routes;
-// - a cached FALLBACK match defers to a dynamic non-fallback match;
-// - dynamic routes take precedence over cached routes with the same
-//   domain+uri;
-// - name lookups consult a lazy cache over the cached routes, then the
+//   - a cached miss or verb mismatch delegates to the dynamic routes;
+//   - a cached FALLBACK match defers to a dynamic non-fallback match;
+//   - dynamic routes take precedence over cached routes with the same
+//     domain+uri;
+//   - name lookups consult a lazy cache over the cached routes, then the
+//
 // dynamic routes.
 type CompiledRouteCollection struct {
 	mu        sync.RWMutex
@@ -70,7 +71,7 @@ func (c *CompiledRouteCollection) Add(route *Route) *Route {
 }
 
 // Match finds the first route matching the request, cached routes first
-//.
+// .
 func (c *CompiledRouteCollection) Match(request *Request) (*Route, []*parameter, error) {
 	route, params := c.matchCached(request)
 	if route == nil {
@@ -145,7 +146,7 @@ func (c *CompiledRouteCollection) Get(method ...string) []*Route {
 }
 
 // All returns the cached routes followed by the dynamic additions
-//.
+// .
 func (c *CompiledRouteCollection) All() []*Route {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -184,7 +185,7 @@ func (c *CompiledRouteCollection) GetRoutes() []*Route {
 }
 
 // GetRoutesByMethod groups the routes by verb
-//.
+// .
 func (c *CompiledRouteCollection) GetRoutesByMethod() map[string][]*Route {
 	out := make(map[string][]*Route)
 	for _, route := range c.All() {
@@ -226,7 +227,7 @@ func (c *CompiledRouteCollection) GetByName(name string) *Route {
 }
 
 // GetByAction resolves a route by its controller action string
-//.
+// .
 func (c *CompiledRouteCollection) GetByAction(action string) (*Route, bool) {
 	for _, route := range c.All() {
 		if route.ActionName() == action {

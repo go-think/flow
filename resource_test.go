@@ -212,7 +212,7 @@ func TestResourceMissingNotOnCollectionActions(t *testing.T) {
 // and deduplicated keeping the first occurrence; a later Middleware() call
 // re-merges the per-action lists with the new base behind them
 // (the reference implementation: /middlewareFor +
-//).
+// ).
 func TestResourceMiddlewareForOrderAndDedup(t *testing.T) {
 	r := New(nil, nil)
 	r.Resource("photos", "PhotoController").Middleware("m1", "m2").
@@ -236,7 +236,7 @@ func TestResourceMiddlewareForOrderAndDedup(t *testing.T) {
 
 // TestResourceExcludedMiddlewareForDedup verifies the excluded list is
 // merged with the base and deduplicated
-//)).
+// )).
 func TestResourceExcludedMiddlewareForDedup(t *testing.T) {
 	r := New(nil, nil)
 	r.Resource("photos", "PhotoController").WithoutMiddleware("x").
@@ -334,7 +334,7 @@ func TestPendingResourceWhereConstraints(t *testing.T) {
 }
 
 // TestGetResourceParametersAndVerbs verifies the global getters
-//.
+// .
 func TestGetResourceParametersAndVerbs(t *testing.T) {
 	r := New(nil, nil)
 	assert.Empty(t, r.GetResourceParameters())
@@ -405,7 +405,7 @@ func TestResourceScopedFieldsFilteredByURI(t *testing.T) {
 // TestResourceActionNamesAreCaseSensitive verifies the the reference implementation-mirrored
 // case handling of only/except: user-provided action names are normalized
 // once ("index" → "Index") and then compared exactly
-//, so arbitrary casing does not match.
+// , so arbitrary casing does not match.
 func TestResourceActionNamesAreCaseSensitive(t *testing.T) {
 	// The conventional lower-case spellings normalize onto the canonical
 	// capitalized verb names.

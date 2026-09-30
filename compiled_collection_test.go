@@ -15,7 +15,6 @@ func (c *domainTestController) Middleware() []ControllerMiddleware { return nil 
 
 func (c *domainTestController) Index() string { return "items" }
 
-
 func TestRestoreCompiledDynamicPrecedence(t *testing.T) {
 	r := NewRouter(nil, nil)
 	r.RegisterController("domainTestController", &domainTestController{})

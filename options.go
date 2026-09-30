@@ -1,7 +1,7 @@
 package flow
 
 // SetSignatureKey sets the secret HMAC key for signed URLs
-//.
+// .
 func (r *router) SetSignatureKey(key string) {
 	r.signatureKey = key
 }

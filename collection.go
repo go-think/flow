@@ -8,7 +8,7 @@ import (
 )
 
 // ErrRouteNotFound is returned when no route matches a request
-//.
+// .
 var ErrRouteNotFound = errors.New("route not found")
 
 // NotFoundError reports that no route matched the request. The message mirrors
@@ -71,7 +71,7 @@ func NewRouteCollection() *RouteCollection {
 }
 
 // Add indexes a route into the collection and returns it
-//. Routes registered with the
+// . Routes registered with the
 // same methods+domain+uri replace the earlier registration, exactly like
 // the reference keyed storage.
 func (c *RouteCollection) Add(route *Route) *Route {
@@ -141,7 +141,7 @@ func (c *RouteCollection) registerIndex(indexes map[string]map[string]int, metho
 }
 
 // Match resolves a request to a route following the reference implementation
-//: candidates for the request verb (domain
+// : candidates for the request verb (domain
 // routes first) are tried in registration order with fallback routes last;
 // otherwise alternate verbs are probed for a 405, and finally a not-found
 // error is produced.
@@ -173,7 +173,7 @@ func (c *RouteCollection) Match(request *Request) (*Route, []*parameter, error) 
 			}
 			allowRoute.handler = func() any {
 				return NewResponse().SetCode(http.StatusOK).
-					Header("Allow", strings.Join(others, ","))
+					Header("Allow", strings.Join(others, ", "))
 			}
 			// the reference implementation binds the synthetic OPTIONS route before returning it
 			// ( → bind).
@@ -231,7 +231,7 @@ func (c *RouteCollection) CheckForAlternateVerbs(request *Request) []string {
 }
 
 // GetByName returns the route registered under the given name, or nil
-//.
+// .
 func (c *RouteCollection) GetByName(name string) *Route {
 	return c.byName[name]
 }
@@ -251,7 +251,7 @@ func (c *RouteCollection) ReindexName(*Route) {
 }
 
 // RefreshNameLookups rebuilds the by-name index
-//.
+// .
 func (c *RouteCollection) RefreshNameLookups() {
 	c.byName = make(map[string]*Route)
 	for _, route := range c.All() {
@@ -264,7 +264,7 @@ func (c *RouteCollection) RefreshNameLookups() {
 }
 
 // RefreshActionLookups rebuilds the by-action index
-//.
+// .
 func (c *RouteCollection) RefreshActionLookups() {
 	c.byAction = make(map[string]*Route)
 	for _, route := range c.All() {
@@ -317,7 +317,7 @@ func (c *RouteCollection) GetRoutesByName() map[string]*Route {
 }
 
 // GetRoutes returns every registered route, domain routes first
-//.
+// .
 func (c *RouteCollection) GetRoutes() []*Route {
 	out := make([]*Route, 0, len(c.allDomains)+len(c.allRoutes))
 	out = append(out, c.allDomains...)

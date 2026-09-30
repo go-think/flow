@@ -222,7 +222,7 @@ func (r *Request) IsMethod(m string) bool {
 }
 
 // SetRoute stores the matched route on the request
-//).
+// ).
 func (r *Request) SetRoute(route *Route) { r.currentRoute = route }
 
 // Route returns the route matched for this request, if any.
@@ -236,7 +236,7 @@ func (r *Request) SetRouteParam(name, value string) {
 }
 
 // ForgetRouteParam removes a route parameter by name
-//.
+// .
 func (r *Request) ForgetRouteParam(name string) {
 	r.routeParamsMu.Lock()
 	defer r.routeParamsMu.Unlock()
@@ -254,8 +254,13 @@ func (r *Request) routeParamsSnapshot() map[string]string {
 	return out
 }
 
+// RouteParams returns a copy of the current route parameters.
+func (r *Request) RouteParams() map[string]string {
+	return r.routeParamsSnapshot()
+}
+
 // SetOriginalParams records the bind-time snapshot of the route parameters
-//.
+// .
 func (r *Request) SetOriginalParams(params []*parameter) {
 	r.routeParamsMu.Lock()
 	defer r.routeParamsMu.Unlock()
@@ -292,7 +297,7 @@ func (r *Request) GetOriginalRouteParam(key string, defaultValue ...string) stri
 }
 
 // SetRouteParamObject stores an object resolved for a route parameter
-//.
+// .
 func (r *Request) SetRouteParamObject(name string, value any) {
 	r.routeParamsMu.Lock()
 	defer r.routeParamsMu.Unlock()
@@ -356,7 +361,7 @@ func (r *Request) parseInputOnce() {
 			r.postValues, r.post = parsePost(r.Request)
 
 			// Parse JSON body if applicable
-			if strings.Contains(r.Request.Header.Get("Content-Type"), "application/json") {
+			if r.IsJson() {
 				body, _ := r.GetContent()
 				if len(body) > 0 {
 					var jsonData map[string]interface{}
@@ -494,6 +499,31 @@ func (r *Request) AllFiles() (map[string]*File, error) {
 	return r.files, nil
 }
 
+// Files returns all uploaded files for the given form key (supports multi-file uploads e.g. "photos" or "photos[]").
+func (r *Request) Files(key string) []*File {
+	if r.Request == nil {
+		return nil
+	}
+	if r.Request.MultipartForm == nil {
+		_ = r.Request.ParseMultipartForm(32 << 20)
+	}
+	if r.Request.MultipartForm == nil || r.Request.MultipartForm.File == nil {
+		return nil
+	}
+	headers := r.Request.MultipartForm.File[key]
+	if len(headers) == 0 {
+		headers = r.Request.MultipartForm.File[key+"[]"]
+	}
+	if len(headers) == 0 {
+		return nil
+	}
+	files := make([]*File, len(headers))
+	for i, fh := range headers {
+		files[i] = &File{FileHeader: fh}
+	}
+	return files
+}
+
 // All get all of the input and query for the request.
 func (r *Request) All(keys ...string) map[string]string {
 	r.parseInputOnce()
@@ -611,7 +641,10 @@ func (r *Request) Url() string {
 
 // FullUrl get the full URL for the request.
 func (r *Request) FullUrl() string {
-	return r.Url() + "?" + r.Request.URL.RawQuery
+	if r.Request != nil && r.Request.URL != nil && r.Request.URL.RawQuery != "" {
+		return r.Url() + "?" + r.Request.URL.RawQuery
+	}
+	return r.Url()
 }
 
 // Path get the current path info for the request.
@@ -931,7 +964,11 @@ func (r *Request) FullUrlWithQuery(query map[string]string) string {
 	for k, v := range query {
 		q.Set(k, v)
 	}
-	return r.Url() + "?" + q.Encode()
+	encoded := q.Encode()
+	if encoded == "" {
+		return r.Url()
+	}
+	return r.Url() + "?" + encoded
 }
 
 // FullUrlWithoutQuery removes specified query parameters from current full URL.
@@ -948,6 +985,174 @@ func (r *Request) FullUrlWithoutQuery(keys ...string) string {
 		return r.Url()
 	}
 	return r.Url() + "?" + encoded
+}
+
+// HasHeader checks if the request has the specified header.
+func (r *Request) HasHeader(key string) bool {
+	if r.Request == nil {
+		return false
+	}
+	return r.Request.Header.Get(key) != ""
+}
+
+// IsJson checks if the request's Content-Type indicates JSON.
+func (r *Request) IsJson() bool {
+	ct := r.Header("Content-Type")
+	return strings.Contains(ct, "/json") || strings.Contains(ct, "+json")
+}
+
+// IP returns the client's IP address. Alias for ClientIP().
+func (r *Request) IP() string {
+	return r.ClientIP()
+}
+
+// Ip returns the client's IP address. Alias for ClientIP().
+func (r *Request) Ip() string {
+	return r.ClientIP()
+}
+
+// Host returns the request host (e.g. "example.com:8080").
+func (r *Request) Host() string {
+	if r.Request == nil {
+		return ""
+	}
+	return r.Request.Host
+}
+
+// Scheme returns the request scheme ("https" or "http").
+func (r *Request) Scheme() string {
+	if r.Request == nil {
+		return "http"
+	}
+	if r.Request.TLS != nil {
+		return "https"
+	}
+	if proto := r.Request.Header.Get("X-Forwarded-Proto"); proto != "" {
+		return proto
+	}
+	if ssl := r.Request.Header.Get("X-Forwarded-Ssl"); ssl == "on" {
+		return "https"
+	}
+	return "http"
+}
+
+// Secure checks if the request was made over HTTPS.
+func (r *Request) Secure() bool {
+	return r.Scheme() == "https"
+}
+
+// Accepts determines whether the request accepts given content types.
+func (r *Request) Accepts(contentTypes ...string) bool {
+	accept := r.Header("Accept")
+	if accept == "" || accept == "*/*" {
+		return true
+	}
+	for _, ct := range contentTypes {
+		if strings.Contains(accept, ct) {
+			return true
+		}
+	}
+	return false
+}
+
+// Prefers returns the first accepted content type from the given candidates.
+func (r *Request) Prefers(contentTypes ...string) string {
+	accept := r.Header("Accept")
+	if accept == "" || accept == "*/*" {
+		if len(contentTypes) > 0 {
+			return contentTypes[0]
+		}
+		return ""
+	}
+	for _, ct := range contentTypes {
+		if strings.Contains(accept, ct) {
+			return ct
+		}
+	}
+	return ""
+}
+
+// WhenFilled executes callback if the key is present and not empty.
+func (r *Request) WhenFilled(key string, callback func(value string)) {
+	if r.Filled(key) {
+		val, _ := r.Input(key)
+		callback(val)
+	}
+}
+
+// WhenHas executes callback if the key is present in the request.
+func (r *Request) WhenHas(key string, callback func(value string)) {
+	if r.Has(key) {
+		val, _ := r.Input(key)
+		callback(val)
+	}
+}
+
+// Date parses an input date string into time.Time. Default layout is time.RFC3339.
+func (r *Request) Date(key string, format ...string) (*time.Time, error) {
+	val, err := r.Input(key)
+	if err != nil || val == "" {
+		return nil, errors.New("date parameter not present")
+	}
+	layout := time.RFC3339
+	if len(format) > 0 && format[0] != "" {
+		layout = format[0]
+	}
+	t, err := time.Parse(layout, val)
+	if err != nil {
+		if t2, err2 := time.Parse("2006-01-02", val); err2 == nil {
+			return &t2, nil
+		}
+		return nil, err
+	}
+	return &t, nil
+}
+
+// BindJson unmarshals the request JSON body into the target pointer.
+func (r *Request) BindJson(target any) error {
+	body, err := r.GetContent()
+	if err != nil {
+		return err
+	}
+	if len(body) == 0 {
+		return errors.New("empty request body")
+	}
+	return json.Unmarshal(body, target)
+}
+
+// Json retrieves a decoded JSON value from the request body by dot-notation key,
+// or returns the entire map/slice if no key is provided.
+func (r *Request) Json(key ...string) any {
+	body, err := r.GetContent()
+	if err != nil || len(body) == 0 {
+		return nil
+	}
+	var data any
+	if err := json.Unmarshal(body, &data); err != nil {
+		return nil
+	}
+	if len(key) == 0 || key[0] == "" {
+		return data
+	}
+	return dataGet(data, key[0])
+}
+
+func dataGet(target any, key string) any {
+	if target == nil || key == "" {
+		return target
+	}
+	parts := strings.Split(key, ".")
+	cur := target
+	for _, part := range parts {
+		if m, ok := cur.(map[string]any); ok {
+			cur = m[part]
+		} else if m, ok := cur.(map[string]string); ok {
+			cur = m[part]
+		} else {
+			return nil
+		}
+	}
+	return cur
 }
 
 // --- End request.go ---
@@ -1093,6 +1298,40 @@ func (r *Response) SetCookieHandler(handler *Cookie) *Response {
 // GetCookies returns the response cookies map.
 func (r *Response) GetCookies() map[string]*http.Cookie {
 	return r.cookies
+}
+
+// WithHeaders sets multiple headers on the response.
+func (r *Response) WithHeaders(headers map[string]string) *Response {
+	for k, v := range headers {
+		r.Header(k, v)
+	}
+	return r
+}
+
+// WithCookie attaches an http.Cookie to the response.
+func (r *Response) WithCookie(cookie *http.Cookie) *Response {
+	if cookie != nil {
+		if r.cookies == nil {
+			r.cookies = make(map[string]*http.Cookie)
+		}
+		r.cookies[cookie.Name] = cookie
+	}
+	return r
+}
+
+// WithoutCookie expires/removes a cookie by setting its max age to -1.
+func (r *Response) WithoutCookie(name string, path ...string) *Response {
+	p := "/"
+	if len(path) > 0 {
+		p = path[0]
+	}
+	return r.WithCookie(&http.Cookie{
+		Name:    name,
+		Value:   "",
+		Path:    p,
+		MaxAge:  -1,
+		Expires: time.Unix(0, 0),
+	})
 }
 
 // Send Sends HTTP headers and content.
@@ -1247,18 +1486,22 @@ func StreamResponse(streamFunc func(w io.Writer) bool) *Response {
 	return r
 }
 
-// StreamDownload creates a new streaming download response
-// (the reference implementation: — the callback runs wrapped so a
-// failure inside it surfaces as StreamedResponseException; headers and
-// disposition are the optional headers map and Content-Disposition type
-// ("attachment", default, or "inline"), and the filename derives the
-// fallbackName-protected disposition value). Existing two-argument callers
-// keep the attachment behavior.
-func StreamDownload(streamFunc func(w io.Writer) bool, filename string, headers map[string]string, disposition ...string) *Response {
-	// the wrapped-exception path rethrows any error from the callback
-	// as StreamedResponseException. Panics with error values are wrapped in
-	// StreamedResponseError (the flow StreamedResponseException), other values
-	// are wrapped as errors first.
+// StreamDownload creates a new streaming download response.
+// headers (map[string]string) and disposition (string, default "attachment") are optional.
+func StreamDownload(streamFunc func(w io.Writer) bool, filename string, args ...any) *Response {
+	var headers map[string]string
+	dispositionName := "attachment"
+	for _, arg := range args {
+		switch v := arg.(type) {
+		case map[string]string:
+			headers = v
+		case string:
+			if v != "" {
+				dispositionName = v
+			}
+		}
+	}
+
 	wrapped := func(w io.Writer) (keep bool) {
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -1273,14 +1516,8 @@ func StreamDownload(streamFunc func(w io.Writer) bool, filename string, headers 
 	}
 
 	r := NewResponse()
-	// streamDownload does NOT force a Content-Type; only headers the caller
-	// supplies (plus the Content-Disposition derived from the filename) are set.
 	for name, value := range headers {
 		r.Header(name, value)
-	}
-	dispositionName := "attachment"
-	if len(disposition) > 0 && disposition[0] != "" {
-		dispositionName = disposition[0]
 	}
 	if filename != "" {
 		r.Header("Content-Disposition", contentDispositionValue(dispositionName, filename))
@@ -1547,6 +1784,44 @@ func (f *File) Move(directory string, name ...string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// Filename returns the original uploaded filename.
+func (f *File) Filename() string {
+	if f.FileHeader == nil {
+		return ""
+	}
+	return f.FileHeader.Filename
+}
+
+// Extension returns the file extension without leading dot (e.g. "png", "pdf").
+func (f *File) Extension() string {
+	if f.FileHeader == nil {
+		return ""
+	}
+	ext := filepath.Ext(f.FileHeader.Filename)
+	return strings.TrimPrefix(ext, ".")
+}
+
+// Size returns the file size in bytes.
+func (f *File) Size() int64 {
+	if f.FileHeader == nil {
+		return 0
+	}
+	return f.FileHeader.Size
+}
+
+// MimeType returns the content-type reported by the file header.
+func (f *File) MimeType() string {
+	if f.FileHeader == nil {
+		return ""
+	}
+	return f.FileHeader.Header.Get("Content-Type")
+}
+
+// IsValid reports whether the uploaded file is valid.
+func (f *File) IsValid() bool {
+	return f.FileHeader != nil && f.FileHeader.Size > 0
 }
 
 // --- End file.go ---

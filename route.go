@@ -166,6 +166,12 @@ func (r *Route) ActionName() string {
 		}
 		return fmt.Sprintf("%T@%s", ca.Controller, ca.Method)
 	}
+	if ca, ok := r.handler.(*ControllerAction); ok && ca != nil {
+		if name, isName := ca.Controller.(string); isName {
+			return name + "@" + ca.Method
+		}
+		return fmt.Sprintf("%T@%s", ca.Controller, ca.Method)
+	}
 	if reflect.ValueOf(r.handler).Kind() == reflect.Func {
 		return normalizeRuntimeActionName(runtime.FuncForPC(reflect.ValueOf(r.handler).Pointer()).Name())
 	}
@@ -215,6 +221,25 @@ func (r *Route) Handler() any {
 	return r.handler
 }
 
+// GetController returns the controller instance or name backing the route action.
+func (r *Route) GetController() any {
+	if r == nil || r.handler == nil {
+		return nil
+	}
+	if ca, ok := r.handler.(ControllerAction); ok {
+		return ca.Controller
+	}
+	if ca, ok := r.handler.(*ControllerAction); ok && ca != nil {
+		return ca.Controller
+	}
+	return nil
+}
+
+// Controller returns the controller instance or name backing the route action.
+func (r *Route) Controller() any {
+	return r.GetController()
+}
+
 // Wheres returns the parameter constraints of the route.
 func (r *Route) Wheres() map[string]string {
 	return r.wheres
@@ -223,6 +248,14 @@ func (r *Route) Wheres() map[string]string {
 // Where adds a regex constraint.
 func (r *Route) Where(name, expression string) *Route {
 	return r.SetWhere(name, expression)
+}
+
+// WhereMap adds multiple regex constraints to route parameters.
+func (r *Route) WhereMap(wheres map[string]string) *Route {
+	for k, v := range wheres {
+		r.SetWhere(k, v)
+	}
+	return r
 }
 
 // SetWhere adds a regex constraint for a route parameter.
@@ -236,7 +269,7 @@ func (r *Route) SetWhere(name, expression string) *Route {
 }
 
 // WhereNumber adds a numeric regex constraint to parameters
-//.
+// .
 func (r *Route) WhereNumber(names ...string) *Route {
 	for _, name := range names {
 		r.SetWhere(name, "[0-9]+")
@@ -245,7 +278,7 @@ func (r *Route) WhereNumber(names ...string) *Route {
 }
 
 // WhereAlpha adds an alphabetic regex constraint to parameters
-//.
+// .
 func (r *Route) WhereAlpha(names ...string) *Route {
 	for _, name := range names {
 		r.SetWhere(name, "[a-zA-Z]+")
@@ -254,7 +287,7 @@ func (r *Route) WhereAlpha(names ...string) *Route {
 }
 
 // WhereAlphaNumeric adds an alphanumeric regex constraint to parameters
-//.
+// .
 func (r *Route) WhereAlphaNumeric(names ...string) *Route {
 	for _, name := range names {
 		r.SetWhere(name, "[a-zA-Z0-9]+")
@@ -263,7 +296,7 @@ func (r *Route) WhereAlphaNumeric(names ...string) *Route {
 }
 
 // WhereUuid adds a UUID regex constraint to parameters
-//.
+// .
 func (r *Route) WhereUuid(names ...string) *Route {
 	for _, name := range names {
 		r.SetWhere(name, `[\da-fA-F]{8}-[\da-fA-F]{4}-[\da-fA-F]{4}-[\da-fA-F]{4}-[\da-fA-F]{12}`)
@@ -272,7 +305,7 @@ func (r *Route) WhereUuid(names ...string) *Route {
 }
 
 // WhereUlid adds a ULID regex constraint to parameters
-//.
+// .
 func (r *Route) WhereUlid(names ...string) *Route {
 	for _, name := range names {
 		r.SetWhere(name, `[0-7][0-9a-hjkmnp-tv-zA-HJKMNP-TV-Z]{25}`)
@@ -320,7 +353,7 @@ func (r *Route) MetadataAll() map[string]any {
 
 // MergeMetadata recursively merges the given metadata into the route's
 // metadata: map values are merged key-wise, other values replace
-//.
+// .
 func (r *Route) MergeMetadata(metadata map[string]any) *Route {
 	r.metadata = mergeMetadataDeep(r.metadata, metadata)
 	return r
@@ -384,7 +417,7 @@ func (r *Route) IsFallback() bool {
 }
 
 // Validators returns the route validators to run for this route
-//.
+// .
 func (r *Route) Validators() []RouteValidator {
 	if r.validators != nil {
 		return r.validators
@@ -393,14 +426,14 @@ func (r *Route) Validators() []RouteValidator {
 }
 
 // SetValidators sets custom route validators for this route
-//.
+// .
 func (r *Route) SetValidators(validators []RouteValidator) *Route {
 	r.validators = validators
 	return r
 }
 
 // Matches reports whether the candidate route satisfies all validators for the request
-//.
+// .
 func (r *Route) Matches(request *Request, includingMethod ...bool) bool {
 	checkMethod := true
 	if len(includingMethod) > 0 {
@@ -525,13 +558,13 @@ func (r *Route) EnforcesScopedBindings() bool {
 }
 
 // BindingFields returns the binding fields declared for parameters
-//.
+// .
 func (r *Route) BindingFields() map[string]string {
 	return r.bindingFields
 }
 
 // SetBindingFieldFor sets the custom binding field for a route parameter
-//.
+// .
 func (r *Route) SetBindingFieldFor(parameter, field string) *Route {
 	if r.bindingFields == nil {
 		r.bindingFields = make(map[string]string)
@@ -542,7 +575,7 @@ func (r *Route) SetBindingFieldFor(parameter, field string) *Route {
 }
 
 // SetBindingFields replaces the map of parameter binding fields
-//.
+// .
 func (r *Route) SetBindingFields(fields map[string]string) *Route {
 	r.bindingFields = fields
 	r.invalidateCompile()
@@ -550,13 +583,13 @@ func (r *Route) SetBindingFields(fields map[string]string) *Route {
 }
 
 // BindingFieldFor returns the binding field declared for a parameter
-//.
+// .
 func (r *Route) BindingFieldFor(name string) string {
 	return r.bindingFieldFor(name)
 }
 
 // WithTrashed marks the route as allowing soft-deleted entities in bindings
-//.
+// .
 func (r *Route) WithTrashed(withTrashed ...bool) *Route {
 	value := true
 	if len(withTrashed) > 0 {
@@ -591,6 +624,15 @@ func (r *Route) SetDefaults(defaults map[string]any) *Route {
 	return r
 }
 
+// Default sets a parameter default on the route.
+func (r *Route) Default(key string, value any) *Route {
+	if r.defaults == nil {
+		r.defaults = make(map[string]any)
+	}
+	r.defaults[key] = value
+	return r
+}
+
 // HasParameters reports whether the route declares parameters. the reference implementation checks
 // the bound-parameter state on the route; flow keeps binding state per request
 // for concurrency safety, so the declaration is reported here.
@@ -618,14 +660,14 @@ func (r *Route) WithoutMiddleware(middlewares ...any) *Route {
 
 // ExcludedMiddleware returns the middleware that should be removed from the
 // route: the route-level exclusions merged with the controller-level ones
-//.
+// .
 func (r *Route) ExcludedMiddleware() []any {
 	out := append([]any(nil), r.withoutMiddleware...)
 	return append(out, r.ExcludedControllerMiddleware()...)
 }
 
 // Middleware returns the raw middleware entries, or appends when args provided
-//.
+// .
 func (r *Route) Middleware(middleware ...any) *Route {
 	if len(middleware) == 0 {
 		return r
@@ -655,7 +697,7 @@ func (r *Route) ControllerMiddleware() []any {
 // GatherMiddleware returns all middleware for the route: the entries attached
 // at registration plus the middleware the controller declares for its method
 // (with only/except filters applied), deduplicated and cached
-//.
+// .
 func (r *Route) GatherMiddleware() []any {
 	r.middlewareMu.Lock()
 	defer r.middlewareMu.Unlock()
@@ -674,14 +716,14 @@ func (r *Route) GatherMiddleware() []any {
 }
 
 // FlushComputedMiddleware clears the gathered middleware cache
-//.
+// .
 func (r *Route) FlushComputedMiddleware() *Route {
 	r.computedMiddleware = nil
 	return r
 }
 
 // HandleMatchedRoute binds the request parameters and returns the bound route
-//.
+// .
 func (r *Route) HandleMatchedRoute(request *Request) *Route {
 	r.Bind(request, request.GetPath())
 	return r
@@ -825,20 +867,41 @@ func (r *Route) Run(request *Request, params ...[]*parameter) (result any) {
 		}
 		return result
 	}
-
-	v := reflect.ValueOf(r.handler)
-	switch v.Type().Kind() {
-	case reflect.Func:
-		in := r.parseParams(v, request, parsedParams)
-		out := v.Call(in)
-		if len(out) > 0 {
-			result = out[0].Interface()
+	if actionPtr, ok := r.handler.(*ControllerAction); ok && actionPtr != nil {
+		result, err := r.router.getControllerDispatcher().Dispatch(r, request, *actionPtr, parsedParams)
+		if err != nil {
+			panic(err)
 		}
-	default:
-		result = r.handler
+		return result
 	}
 
-	return result
+	if r.router != nil {
+		dispatcher := r.router.GetCallableDispatcher()
+		if dispatcher != nil {
+			res, err := dispatcher.Dispatch(r, r.handler, request, parsedParams)
+			if err != nil {
+				panic(err)
+			}
+			return res
+		}
+	}
+
+	return r.runCallable(r.handler, request, parsedParams)
+}
+
+func (r *Route) runCallable(callable any, request *Request, params []*parameter) any {
+	v := reflect.ValueOf(callable)
+	switch v.Type().Kind() {
+	case reflect.Func:
+		in := r.parseParams(v, request, params)
+		out := v.Call(in)
+		if len(out) > 0 {
+			return out[0].Interface()
+		}
+	default:
+		return callable
+	}
+	return nil
 }
 
 // ValidateParams checks whether the given parameters satisfy the where
@@ -872,7 +935,7 @@ func (r *Route) Parameter(request *Request, name string, defaultValue ...string)
 }
 
 // Parameters returns the route parameters of the request
-//).
+// ).
 func (r *Route) Parameters(request *Request) map[string]string {
 	out := make(map[string]string)
 	if request == nil {
