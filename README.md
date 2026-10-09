@@ -133,8 +133,9 @@ r.Put("/users/{id}", updateUser)
 r.Delete("/users/{id}", deleteUser)
 r.Patch("/users/{id}", patchUser)
 r.Options("/users", optionsHandler)
+r.Query("/users", queryHandler)
 
-// Match any HTTP verb
+// Match any HTTP verb (GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, QUERY)
 r.Any("/any", anyHandler)
 
 // Match custom combination of methods

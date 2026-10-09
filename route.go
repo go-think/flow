@@ -725,7 +725,7 @@ func (r *Route) FlushComputedMiddleware() *Route {
 // HandleMatchedRoute binds the request parameters and returns the bound route
 // .
 func (r *Route) HandleMatchedRoute(request *Request) *Route {
-	r.Bind(request, request.GetPath())
+	r.Bind(request)
 	return r
 }
 
@@ -747,8 +747,12 @@ func (r *Route) MatchesMethodAndPath(method, path string) bool {
 // (the reference implementation: bind — + originalParameters
 // snapshot) and mirrors them onto the request for Context access. Host
 // parameters extracted from a dynamic domain come first, path parameters
-// follow in declaration order, and defaults fill anything missing.
-func (r *Route) Bind(req *Request, path string, treeParams ...[]*parameter) []*parameter {
+// follow in declaration order, and defaults fill anything missing. The bound
+// path is derived from the request itself (RouteParameterBinder uses
+// req.GetPath()), so callers that need a different path — e.g. the trailing
+// slash trim of the reference requestWithoutTrailingSlash — swap it on a
+// request copy before calling.
+func (r *Route) Bind(req *Request) []*parameter {
 	r.compile()
 
 	binder := NewRouteParameterBinder(r)
@@ -791,12 +795,13 @@ func (r *Route) Bind(req *Request, path string, treeParams ...[]*parameter) []*p
 	return parameters
 }
 
-// Run executes the route action and returns its raw result. When no explicit
-// parameters are passed, they are recovered from the request by the parameter
-// names declared in the pattern. A route without an action fails like
+// Run executes the route action and returns its raw result. The bound
+// parameters are recovered from the request mirror — the per-request state
+// flow substitutes for the reference route-held parameters, which a shared
+// Route cannot carry safely. A route without an action fails like
 // the reference ("Route [uri] has no action.")
 // instead of silently returning nil.
-func (r *Route) Run(request *Request, params ...[]*parameter) (result any) {
+func (r *Route) Run(request *Request) (result any) {
 	if r == nil {
 		return nil
 	}
@@ -828,19 +833,20 @@ func (r *Route) Run(request *Request, params ...[]*parameter) (result any) {
 		}
 	}
 
+	// The parameters bound by Bind ride the request mirror; recover them by
+	// the declared parameter names in host-first order — the same order Bind
+	// returns them (the reference binder merges host parameters ahead of the
+	// path parameters). Scalar injection is positional, so this order is
+	// load-bearing: a handler func(account, user string) on
+	// "{account}.myapp.com/users/{user}" must receive the host value first.
 	var parsedParams []*parameter
-	if len(params) > 0 {
-		parsedParams = params[0]
-	} else if request != nil {
+	if request != nil {
 		r.compile()
-		for _, variant := range r.expanded {
-			for _, name := range variant.parameterNames {
-				parsedParams = append(parsedParams, &parameter{
-					name:  name,
-					value: request.GetRouteParam(name),
-				})
-			}
-			break // all variants declare the same parameter set
+		for _, name := range r.ParameterNames() {
+			parsedParams = append(parsedParams, &parameter{
+				name:  name,
+				value: request.GetRouteParam(name),
+			})
 		}
 	}
 

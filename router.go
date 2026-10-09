@@ -30,6 +30,8 @@ type Router interface {
 	Delete(pattern string, handler interface{}) Router
 	// Options registers an OPTIONS route.
 	Options(pattern string, handler interface{}) Router
+	// Query registers a QUERY route (the reference implementation query).
+	Query(pattern string, handler interface{}) Router
 	// Any registers a route responding to all standard verbs.
 	Any(pattern string, handler interface{}) Router
 	// Fallback registers a fallback route: a real route on GET/HEAD that
@@ -306,7 +308,10 @@ type GroupAttributes struct {
 	WithTrashed       bool
 }
 
-var verbs = []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+// verbs is the standard HTTP verb list (the reference Router::$verbs),
+// including the QUERY verb; checkForAlternateVerbs probes it and Any
+// registers against it.
+var verbs = []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "QUERY"}
 
 type RouteRequest interface {
 	GetMethod() string
@@ -450,7 +455,7 @@ func (r *router) Dispatch(request any) *Response {
 	root.currentRequest = req
 	root.currentMu.Unlock()
 
-	route, params, err := root.findRoute(req)
+	route, err := root.findRoute(req)
 	if err != nil {
 		var notAllowed *MethodNotAllowedError
 		if errors.As(err, &notAllowed) {
@@ -468,13 +473,13 @@ func (r *router) Dispatch(request any) *Response {
 		return NotFoundResponse()
 	}
 
-	return root.runRoute(req, route, params)
+	return root.runRoute(req, route)
 }
 
 // findRoute resolves the request to a Route entity, records it as the current
-// route and binds its parameters (the reference implementation: findRoute — fires the Routing event
+// route and binds its parameters onto the request (the reference implementation: findRoute — fires the Routing event
 // and binds the route into the container).
-func (r *router) findRoute(request *Request) (*Route, []*parameter, error) {
+func (r *router) findRoute(request *Request) (*Route, error) {
 	// the reference implementation fires the Routing event before matching.
 	for _, callback := range r.onRouting {
 		callback(request)
@@ -483,9 +488,9 @@ func (r *router) findRoute(request *Request) (*Route, []*parameter, error) {
 		r.events.Dispatch("flow.routing", request)
 	}
 
-	route, params, err := r.collection.Match(request)
+	route, err := r.collection.Match(request)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	request.SetRoute(route)
@@ -500,13 +505,13 @@ func (r *router) findRoute(request *Request) (*Route, []*parameter, error) {
 	if r.container != nil {
 		r.container.Instance("route", route)
 	}
-	return route, params, nil
+	return route, nil
 }
 
 // runRoute fires the matched callbacks and runs the route within its
 // middleware stack (the reference implementation: runRoute — setRouteResolver, RouteMatched event,
 // prepareResponse of runRouteWithinStack).
-func (r *router) runRoute(request *Request, route *Route, params []*parameter) (result *Response) {
+func (r *router) runRoute(request *Request, route *Route) (result *Response) {
 	for _, callback := range r.onRouteMatched {
 		callback(route, request)
 	}
@@ -532,16 +537,16 @@ func (r *router) runRoute(request *Request, route *Route, params []*parameter) (
 	if r.container != nil && r.container.Bound("middleware.disable") {
 		if v := r.container.Make("middleware.disable"); v != nil {
 			if disabled, ok := v.(bool); ok && disabled {
-				return r.prepareResponse(request, route.Run(request, params))
+				return r.prepareResponse(request, route.Run(request))
 			}
 		}
 	}
 
 	if r.disableMiddleware {
-		return r.prepareResponse(request, route.Run(request, params))
+		return r.prepareResponse(request, route.Run(request))
 	}
 
-	out := r.runRouteWithinStack(route, request, params)
+	out := r.runRouteWithinStack(route, request)
 	// The pipeline destination already prepared the response (middlewares
 	// observe a *Response on the way out); avoid re-preparing and firing the
 	// response events twice.
@@ -555,7 +560,7 @@ func (r *router) runRoute(request *Request, route *Route, params []*parameter) (
 // excluding route-level exclusions) and runs the action inside the onion. The
 // response is prepared inside the pipeline destination so that middlewares
 // always observe a *Response on the way out.
-func (r *router) runRouteWithinStack(route *Route, request *Request, params []*parameter) any {
+func (r *router) runRouteWithinStack(route *Route, request *Request) any {
 	pipeline := NewPipeline()
 	root := r.root()
 	if root.exceptionHandler != nil {
@@ -586,7 +591,7 @@ func (r *router) runRouteWithinStack(route *Route, request *Request, params []*p
 				panic(rec)
 			}
 		}()
-		return r.prepareResponse(req, route.Run(req, params))
+		return r.prepareResponse(req, route.Run(req))
 	})
 }
 
@@ -759,6 +764,11 @@ func (r *router) Delete(pattern string, handler interface{}) Router {
 // Options registers an OPTIONS route.
 func (r *router) Options(pattern string, handler interface{}) Router {
 	return r.Add(Method("OPTIONS"), pattern, handler)
+}
+
+// Query registers a QUERY route (the reference implementation query).
+func (r *router) Query(pattern string, handler interface{}) Router {
+	return r.Add(Method("QUERY"), pattern, handler)
 }
 
 // Any registers a route responding to all standard verbs.
@@ -1311,7 +1321,7 @@ func (r *router) Register() {
 // Dump returns a debug dump of all registered routes.
 func (r *router) Dump() []byte {
 	var b bytes.Buffer
-	for _, route := range r.collection.All() {
+	for _, route := range r.collection.GetRoutes() {
 		fmt.Fprintf(&b, "%s %s %T \r\n", strings.Join(route.Methods(), "|"), route.URI(), route.Handler())
 	}
 	return b.Bytes()
@@ -1694,7 +1704,11 @@ func (r *router) NamedRouteDomain(name string) (string, bool) {
 	if r.collection == nil {
 		return "", false
 	}
-	return r.collection.NamedRouteDomain(name)
+	route := r.collection.GetByName(name)
+	if route == nil {
+		return "", false
+	}
+	return route.GetDomain(), route.GetDomain() != ""
 }
 
 // SignedUrl creates a signed URL for a named route.
@@ -1852,8 +1866,8 @@ func (r *router) ActionRoutePattern(action string) (string, bool) {
 	if r.collection == nil {
 		return "", false
 	}
-	route, ok := r.collection.GetByAction(action)
-	if !ok {
+	route := r.collection.GetByAction(action)
+	if route == nil {
 		return "", false
 	}
 	return route.URI(), true
@@ -1876,7 +1890,7 @@ func (r *router) CurrentRequest() *Request {
 // MatchRequest resolves a request to a Route entity and binds its parameters.
 func (r *router) MatchRequest(request *Request) (*Route, error) {
 	r.flushPending()
-	route, _, err := r.findRoute(request)
+	route, err := r.findRoute(request)
 	return route, err
 }
 
@@ -1932,7 +1946,7 @@ func (r *router) SoftDeletableResources(resources map[string]any, options ...Res
 // GetRoutes returns every registered route.
 func (r *router) GetRoutes() []*Route {
 	r.flushPending()
-	return r.collection.All()
+	return r.collection.GetRoutes()
 }
 
 // flushPending materializes deferred resource registrations.
@@ -2137,7 +2151,7 @@ type compiledRouteData struct {
 func (r *router) Compile() ([]byte, error) {
 	var out []compiledRouteData
 	assignedNames := make(map[string]bool)
-	for _, route := range r.collection.All() {
+	for _, route := range r.collection.GetRoutes() {
 		action, ok := route.Handler().(ControllerAction)
 		if !ok {
 			return nil, fmt.Errorf("flow: route [%s] has a non-serializable action and cannot be cached", route.URI())
@@ -2658,7 +2672,7 @@ func (r *router) DispatchToRoute(request *Request) *Response {
 		root.register(root)
 		root.registered = true
 	}
-	route, params, err := root.findRoute(request)
+	route, err := root.findRoute(request)
 	if err != nil {
 		var notFound *NotFoundError
 		if errors.As(err, &notFound) {
@@ -2673,7 +2687,7 @@ func (r *router) DispatchToRoute(request *Request) *Response {
 		}
 		return NotFoundResponse()
 	}
-	return root.runRoute(request, route, params)
+	return root.runRoute(request, route)
 }
 
 // SubstituteBindings resolves the explicit bindings of the route: every

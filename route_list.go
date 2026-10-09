@@ -42,7 +42,7 @@ func (r *router) RouteList() []RouteSummary {
 	if root.collection == nil {
 		return nil
 	}
-	routes := root.collection.All()
+	routes := root.collection.GetRoutes()
 	out := make([]RouteSummary, len(routes))
 	for i, route := range routes {
 		out[i] = route.Summary()
@@ -63,7 +63,7 @@ func (c *RouteCollection) Summary() []RouteSummary {
 	if c == nil {
 		return nil
 	}
-	routes := c.All()
+	routes := c.GetRoutes()
 	out := make([]RouteSummary, len(routes))
 	for i, route := range routes {
 		out[i] = route.Summary()

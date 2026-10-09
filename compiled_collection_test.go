@@ -40,7 +40,7 @@ func TestRestoreCompiledDynamicPrecedence(t *testing.T) {
 	assert.Equal(t, "items", res2.GetContent())
 
 	// The route LIST prefers the dynamic route on the same domain+uri.
-	list := r2.Routes().GetByMethod("GET")
+	list := r2.Routes().Get("GET")
 	var found string
 	for _, rt := range list {
 		if rt.GetUri() == "/v1/items" {

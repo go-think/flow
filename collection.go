@@ -41,164 +41,296 @@ func (e *MethodNotAllowedError) Error() string { return e.Message }
 // listed first, and name/action lookup tables where the first registration
 // wins.
 type RouteCollection struct {
-	// methodRoutes[method] holds non-domain routes for the verb in
-	// registration order; methodIndexes[method] maps domainAndUri to its slot
-	// so re-registration replaces the entry instead of appending.
-	methodRoutes  map[string][]*Route
-	methodIndexes map[string]map[string]int
-	methodDomains map[string][]*Route
-	domainIndexes map[string]map[string]int
-	allRoutes     []*Route
-	allIndexes    map[string]int
-	allDomains    []*Route
-	domainKeyIdx  map[string]int
-	byName        map[string]*Route
-	byAction      map[string]*Route
+	// routes[method] holds the non-domain routes for the verb in registration
+	// order, emulating the reference insertion-ordered array
+	// ($this->routes[$method][$domainAndUri]); routesOrder maps the bucket key
+	// to its slot so re-registration replaces the entry instead of appending.
+	routes               map[string][]*Route
+	routesOrder          map[string]map[string]int
+	domainRoutes         map[string][]*Route
+	domainRoutesOrder    map[string]map[string]int
+	allRoutes            []*Route
+	allRoutesOrder       map[string]int
+	allDomainRoutes      []*Route
+	allDomainRoutesOrder map[string]int
+	nameList             map[string]*Route
+	actionList           map[string]*Route
 }
 
 // NewRouteCollection creates an empty route collection.
 func NewRouteCollection() *RouteCollection {
 	return &RouteCollection{
-		methodRoutes:  make(map[string][]*Route),
-		methodIndexes: make(map[string]map[string]int),
-		methodDomains: make(map[string][]*Route),
-		domainIndexes: make(map[string]map[string]int),
-		allIndexes:    make(map[string]int),
-		domainKeyIdx:  make(map[string]int),
-		byName:        make(map[string]*Route),
-		byAction:      make(map[string]*Route),
+		routes:               make(map[string][]*Route),
+		routesOrder:          make(map[string]map[string]int),
+		domainRoutes:         make(map[string][]*Route),
+		domainRoutesOrder:    make(map[string]map[string]int),
+		allRoutesOrder:       make(map[string]int),
+		allDomainRoutesOrder: make(map[string]int),
+		nameList:             make(map[string]*Route),
+		actionList:           make(map[string]*Route),
 	}
 }
 
-// Add indexes a route into the collection and returns it
-// . Routes registered with the
-// same methods+domain+uri replace the earlier registration, exactly like
-// the reference keyed storage.
+// Add adds a Route instance to the collection (the reference implementation
+// add → addToCollections + addLookups). Routes registered with the same
+// methods+domain+uri replace the earlier registration, exactly like the
+// reference keyed storage.
 func (c *RouteCollection) Add(route *Route) *Route {
-	methods := route.Methods()
-	domainAndUri := route.GetDomain() + route.URI()
-	allKey := strings.Join(methods, "|") + domainAndUri
+	c.addToCollections(route)
 
-	if route.GetDomain() != "" {
-		for _, method := range methods {
-			list := c.methodDomains[method]
-			c.upsert(&list, c.registerIndex(c.domainIndexes, method), domainAndUri, route)
-			c.methodDomains[method] = list
-		}
-		c.upsert(&c.allDomains, c.domainKeyIdx, allKey, route)
-	} else {
-		for _, method := range methods {
-			list := c.methodRoutes[method]
-			c.upsert(&list, c.registerIndex(c.methodIndexes, method), domainAndUri, route)
-			c.methodRoutes[method] = list
-		}
-		c.upsert(&c.allRoutes, c.allIndexes, allKey, route)
-	}
+	c.addLookups(route)
 
-	// Name and action lookups keep the first registration, like
-	//. The action list only holds string
-	// controller references (the reference implementation: addToActionList indexes
-	// action['controller'] exclusively — closures never enter it).
-	if name := route.GetName(); name != "" {
-		if _, ok := c.byName[name]; !ok {
-			c.byName[name] = route
-		}
-	}
-	if action := route.ActionName(); action != "" {
-		if ca, ok := route.handler.(ControllerAction); ok {
-			if _, isStr := ca.Controller.(string); isStr {
-				if _, exists := c.byAction[action]; !exists {
-					c.byAction[action] = route
-				}
-			}
-		}
-	}
 	return route
 }
 
-// upsert replaces the entry at a known slot or appends a new one, keeping
-// insertion order stable across re-registrations.
-func (c *RouteCollection) upsert(list *[]*Route, index map[string]int, key string, route *Route) {
-	if index == nil {
-		index = make(map[string]int)
+// addToCollections adds the given route to the arrays of routes (the reference
+// implementation protected addToCollections): domain routes join the
+// per-method domain buckets and the domain-flattened array; everything else
+// joins the per-method buckets and the flattened array.
+func (c *RouteCollection) addToCollections(route *Route) {
+	methods := route.Methods()
+	domainAndUri := route.GetDomain() + route.URI()
+	allRoutesKey := strings.Join(methods, "|") + domainAndUri
+
+	if route.GetDomain() != "" {
+		for _, method := range methods {
+			list := c.domainRoutes[method]
+			upsertRoute(&list, orderFor(c.domainRoutesOrder, method), domainAndUri, route)
+			c.domainRoutes[method] = list
+		}
+		list := c.allDomainRoutes
+		upsertRoute(&list, c.allDomainRoutesOrder, allRoutesKey, route)
+		c.allDomainRoutes = list
+	} else {
+		for _, method := range methods {
+			list := c.routes[method]
+			upsertRoute(&list, orderFor(c.routesOrder, method), domainAndUri, route)
+			c.routes[method] = list
+		}
+		list := c.allRoutes
+		upsertRoute(&list, c.allRoutesOrder, allRoutesKey, route)
+		c.allRoutes = list
 	}
-	if slot, ok := index[key]; ok {
-		(*list)[slot] = route
-		return
-	}
-	index[key] = len(*list)
-	*list = append(*list, route)
 }
 
-// registerIndex lazily creates the per-method index map.
-func (c *RouteCollection) registerIndex(indexes map[string]map[string]int, method string) map[string]int {
-	if idx, ok := indexes[method]; ok {
-		return idx
+// addLookups adds the route to any look-up tables if necessary (the reference
+// implementation protected addLookups). The name and action lookups keep the
+// first registration; the action list holds every controller action (the
+// reference gates on action['controller'] ?? null, which RouteAction::parse
+// sets for all controller actions and never for closures).
+func (c *RouteCollection) addLookups(route *Route) {
+	// If the route has a name, we will add it to the name look-up table, so
+	// that we will quickly be able to find the route associated with a name
+	// and not have to iterate through every route every time we need to find
+	// a named route.
+	if name := route.GetName(); name != "" && !c.inNameLookup(name) {
+		c.nameList[name] = route
 	}
-	idx := make(map[string]int)
-	indexes[method] = idx
-	return idx
+
+	// When the route is routing to a controller we will also store the action
+	// that is used by the route. This will let us reverse route to
+	// controllers while processing a request and easily generate URLs to the
+	// given controllers.
+	action := route.getAction()
+
+	if controller, ok := action["controller"].(string); ok && controller != "" && !c.inActionLookup(controller) {
+		c.addToActionList(action, route)
+	}
 }
 
-// Match resolves a request to a route following the reference implementation
-// : candidates for the request verb (domain
-// routes first) are tried in registration order with fallback routes last;
-// otherwise alternate verbs are probed for a 405, and finally a not-found
-// error is produced.
-func (c *RouteCollection) Match(request *Request) (*Route, []*parameter, error) {
+// addToActionList adds a route to the controller action dictionary (the
+// reference implementation protected addToActionList). Deviation: the
+// reference trims PHP namespace separators (leading backslashes) from the
+// controller; Go controller names never carry them, so the trim is omitted.
+func (c *RouteCollection) addToActionList(action map[string]any, route *Route) {
+	controller, _ := action["controller"].(string)
+	c.actionList[controller] = route
+}
+
+// inActionLookup determines if the given controller is in the action lookup
+// table (the reference implementation protected inActionLookup).
+func (c *RouteCollection) inActionLookup(action string) bool {
+	_, ok := c.actionList[action]
+	return ok
+}
+
+// inNameLookup determines if the given name is in the name lookup table (the
+// reference implementation protected inNameLookup).
+func (c *RouteCollection) inNameLookup(name string) bool {
+	_, ok := c.nameList[name]
+	return ok
+}
+
+// RefreshNameLookups refreshes the name look-up table. This is done in case
+// any names are fluently defined or if routes are overwritten (the reference
+// implementation refreshNameLookups).
+func (c *RouteCollection) RefreshNameLookups() {
+	c.nameList = make(map[string]*Route)
+
+	for _, route := range c.GetRoutes() {
+		if name := route.GetName(); name != "" && !c.inNameLookup(name) {
+			c.nameList[name] = route
+		}
+	}
+}
+
+// RefreshActionLookups refreshes the action look-up table. This is done in
+// case any actions are overwritten with new controllers (the reference
+// implementation refreshActionLookups). Deviation: the reference only indexes
+// action['controller'] (string controller actions), while this pass indexes
+// every route with a non-empty ActionName — including method-value handlers
+// ("Type.Method") — so UrlGenerator.Action() can resolve them after a fluent
+// name set; the inherited "Closure" guard is kept but never fires.
+func (c *RouteCollection) RefreshActionLookups() {
+	c.actionList = make(map[string]*Route)
+
+	for _, route := range c.GetRoutes() {
+		action := route.getAction()
+		if controller := route.ActionName(); controller != "" && controller != "Closure" && !c.inActionLookup(controller) {
+			// Deviation carrier: inject the loose action name (e.g.
+			// "Type.Method" for method-value handlers) into the bag so they
+			// are indexed too and UrlGenerator.Action() can resolve them.
+			action["controller"] = controller
+			c.addToActionList(action, route)
+		}
+	}
+}
+
+// Match finds the first route matching a given request (the reference
+// implementation match): candidates for the request verb (domain routes
+// first) are tried in registration order with fallback routes last; the
+// bound parameters are mirrored onto the request (the per-request state flow
+// substitutes for the reference route-held parameters). The Go spelling
+// returns an error instead of throwing the reference
+// methodNotAllowed/notFound exceptions.
+func (c *RouteCollection) Match(request *Request) (*Route, error) {
 	routes := c.Get(request.GetMethod())
 
-	route := matchAgainstRoutes(routes, request, true)
+	// First, we will see if we can find a matching route for this current
+	// request method. If we can, great, we can just return it so that it can
+	// be called by the consumer. Otherwise we will check for routes with
+	// another verb.
+	route := c.matchAgainstRoutes(routes, request, true)
+
+	return c.handleMatchedRoute(request, route)
+}
+
+// Get gets routes from the collection by method (the reference implementation
+// get($method = null)): with a method it returns the routes indexed for that
+// method, domain routes first; without one it returns the full collection.
+func (c *RouteCollection) Get(method ...string) []*Route {
+	if len(method) == 0 {
+		return c.GetRoutes()
+	}
+	return append(append([]*Route(nil), c.domainRoutes[method[0]]...), c.routes[method[0]]...)
+}
+
+// HasNamedRoute determines if the route collection contains a given named
+// route (the reference implementation hasNamedRoute).
+func (c *RouteCollection) HasNamedRoute(name string) bool {
+	return c.GetByName(name) != nil
+}
+
+// GetByName gets a route instance by its name (the reference implementation
+// getByName), or nil when no route carries the name.
+func (c *RouteCollection) GetByName(name string) *Route {
+	return c.nameList[name]
+}
+
+// GetByAction gets a route instance by its controller action (the reference
+// implementation getByAction — e.g. "UserController@index"), or nil when no
+// route uses the action.
+func (c *RouteCollection) GetByAction(action string) *Route {
+	return c.actionList[action]
+}
+
+// GetRoutes gets all of the routes in the collection (the reference
+// implementation getRoutes), domain routes first.
+func (c *RouteCollection) GetRoutes() []*Route {
+	out := make([]*Route, 0, len(c.allDomainRoutes)+len(c.allRoutes))
+	out = append(out, c.allDomainRoutes...)
+	out = append(out, c.allRoutes...)
+	return out
+}
+
+// GetRoutesByMethod gets all of the routes keyed by their HTTP verb / method
+// (the reference implementation getRoutesByMethod), domain routes first.
+func (c *RouteCollection) GetRoutesByMethod() map[string][]*Route {
+	result := make(map[string][]*Route, len(c.domainRoutes))
+	for method := range c.domainRoutes {
+		result[method] = c.Get(method)
+	}
+	for method := range c.routes {
+		if _, ok := result[method]; !ok {
+			result[method] = c.Get(method)
+		}
+	}
+	return result
+}
+
+// GetRoutesByName gets all of the routes keyed by their name (the reference
+// implementation getRoutesByName).
+func (c *RouteCollection) GetRoutesByName() map[string]*Route {
+	out := make(map[string]*Route, len(c.nameList))
+	for name, route := range c.nameList {
+		out[name] = route
+	}
+	return out
+}
+
+// The methods above mirror the reference RouteCollection class in its file
+// order; the ones below mirror the parent AbstractRouteCollection, in that
+// file's order. Its Symfony route-cache/serialization members (compile,
+// dumper, toSymfonyRouteCollection, addToSymfonyRoutesCollection,
+// generateRouteName) have no Go counterpart.
+
+// handleMatchedRoute handles the matched route (the reference implementation
+// protected handleMatchedRoute): a match is bound to the request; otherwise
+// alternate verbs are probed for a 405 and finally a not-found error is
+// produced.
+func (c *RouteCollection) handleMatchedRoute(request *Request, route *Route) (*Route, error) {
 	if route != nil {
-		return route, route.Bind(request, request.GetPath()), nil
+		route.Bind(request)
+		return route, nil
 	}
 
-	// the reference messages use the request path: the URI trimmed on both sides,
-	// with the root path reported as "/" ().
-	requestPath := request.GetPath()
-	if trimmed := strings.Trim(requestPath, "/"); trimmed != "" {
-		requestPath = trimmed
-	} else {
-		requestPath = "/"
-	}
+	// If no route was found we will now check if a matching route is
+	// specified by another HTTP verb. If it is we will need to throw a
+	// MethodNotAllowed and inform the user agent of which HTTP verb it should
+	// use for this route.
+	others := c.checkForAlternateVerbs(request)
 
-	// No route matched: probe the other verbs (the reference implementation: checkForAlternateVerbs,
-	// in Router verb order) for a 405, or answer OPTIONS directly.
-	others := c.CheckForAlternateVerbs(request)
 	if len(others) > 0 {
-		if request.GetMethod() == "OPTIONS" {
-			allowRoute := &Route{
-				methods: []string{"OPTIONS"},
-				uri:     "/" + strings.TrimLeft(request.GetPath(), "/"),
-			}
-			allowRoute.handler = func() any {
-				return NewResponse().SetCode(http.StatusOK).
-					Header("Allow", strings.Join(others, ", "))
-			}
-			// the reference implementation binds the synthetic OPTIONS route before returning it
-			// ( → bind).
-			params := allowRoute.Bind(request, request.GetPath())
-			return allowRoute, params, nil
-		}
-		return nil, nil, &MethodNotAllowedError{
-			Allowed: others,
-			Message: fmt.Sprintf(
-				"The %s method is not supported for route %s. Supported methods: %s.",
-				request.GetMethod(), requestPath, strings.Join(others, ", "),
-			),
-		}
+		return c.getRouteForMethods(request, others)
 	}
 
-	return nil, nil, &NotFoundError{
-		Message: fmt.Sprintf("The route %s could not be found.", requestPath),
+	return nil, &NotFoundError{
+		Message: fmt.Sprintf("The route %s could not be found.", requestPathOf(request)),
 	}
 }
 
-// matchAgainstRoutes returns the first route matching the request, probing the
-// candidates in the given order. Fallback routes never win over a regular
-// match: the first fallback hit is remembered and only returned when nothing
-// else matches.
-func matchAgainstRoutes(routes []*Route, request *Request, includingMethod bool) *Route {
+// checkForAlternateVerbs determines if any routes match on another HTTP verb
+// (the reference implementation protected checkForAlternateVerbs): every verb
+// except the request verb is probed, in Router verb order.
+func (c *RouteCollection) checkForAlternateVerbs(request *Request) []string {
+	method := request.GetMethod()
+	var others []string
+	for _, verb := range verbs {
+		if verb == method {
+			continue
+		}
+		if c.matchAgainstRoutes(c.Get(verb), request, false) != nil {
+			others = append(others, verb)
+		}
+	}
+	return others
+}
+
+// matchAgainstRoutes determines if a route in the array matches the request
+// (the reference implementation protected matchAgainstRoutes). Fallback routes
+// never win over a regular match: the first fallback hit is remembered and
+// only returned when nothing else matches.
+func (c *RouteCollection) matchAgainstRoutes(routes []*Route, request *Request, includingMethod bool) *Route {
 	var fallbackRoute *Route
 	for _, route := range routes {
 		if route.Matches(request, includingMethod) {
@@ -214,157 +346,113 @@ func matchAgainstRoutes(routes []*Route, request *Request, includingMethod bool)
 	return fallbackRoute
 }
 
-// CheckForAlternateVerbs reports which other verbs have a route matching the
-// request, in Router verb order.
-func (c *RouteCollection) CheckForAlternateVerbs(request *Request) []string {
-	method := request.GetMethod()
-	var others []string
-	for _, verb := range verbs {
-		if verb == method {
-			continue
+// getRouteForMethods gets a route (if necessary) that responds when other
+// available methods are present (the reference implementation protected
+// getRouteForMethods): an OPTIONS request gets a synthetic route answering
+// with the Allow header; any other verb gets a method-not-allowed error.
+func (c *RouteCollection) getRouteForMethods(request *Request, methods []string) (*Route, error) {
+	if request.GetMethod() == "OPTIONS" {
+		allowRoute := &Route{
+			methods: []string{"OPTIONS"},
+			uri:     "/" + strings.TrimLeft(request.GetPath(), "/"),
 		}
-		if matchAgainstRoutes(c.Get(verb), request, false) != nil {
-			others = append(others, verb)
+		allowRoute.handler = func() any {
+			return NewResponse().SetCode(http.StatusOK).
+				Header("Allow", strings.Join(methods, ","))
 		}
+		// the reference implementation binds the synthetic OPTIONS route
+		// before returning it.
+		allowRoute.Bind(request)
+		return allowRoute, nil
 	}
-	return others
+
+	return nil, c.requestMethodNotAllowed(request, methods, request.GetMethod())
 }
 
-// GetByName returns the route registered under the given name, or nil
-// .
-func (c *RouteCollection) GetByName(name string) *Route {
-	return c.byName[name]
-}
-
-// GetByAction returns the route registered with the given controller action
-// string (e.g. "UserController@index").
-func (c *RouteCollection) GetByAction(action string) (*Route, bool) {
-	route, ok := c.byAction[action]
-	return route, ok
-}
-
-// ReindexName rebuilds the name and action lookups after a route was mutated
-// post-registration.
-func (c *RouteCollection) ReindexName(*Route) {
-	c.RefreshNameLookups()
-	c.RefreshActionLookups()
-}
-
-// RefreshNameLookups rebuilds the by-name index
-// .
-func (c *RouteCollection) RefreshNameLookups() {
-	c.byName = make(map[string]*Route)
-	for _, route := range c.All() {
-		if name := route.GetName(); name != "" {
-			if _, ok := c.byName[name]; !ok {
-				c.byName[name] = route
-			}
-		}
+// requestMethodNotAllowed reports a method not allowed error (the reference
+// implementation protected requestMethodNotAllowed).
+func (c *RouteCollection) requestMethodNotAllowed(request *Request, others []string, method string) error {
+	return &MethodNotAllowedError{
+		Allowed: others,
+		Message: fmt.Sprintf(
+			"The %s method is not supported for route %s. Supported methods: %s.",
+			method, requestPathOf(request), strings.Join(others, ", "),
+		),
 	}
 }
 
-// RefreshActionLookups rebuilds the by-action index
-// .
-func (c *RouteCollection) RefreshActionLookups() {
-	c.byAction = make(map[string]*Route)
-	for _, route := range c.All() {
-		if action := route.ActionName(); action != "" && action != "Closure" {
-			if _, ok := c.byAction[action]; !ok {
-				c.byAction[action] = route
-			}
-		}
+// methodNotAllowed reports a method not allowed error (the reference
+// implementation protected methodNotAllowed).
+//
+// Deprecated: use requestMethodNotAllowed, which mirrors the current reference
+// implementation (its message names the route).
+func (c *RouteCollection) methodNotAllowed(others []string, method string) error {
+	return &MethodNotAllowedError{
+		Allowed: others,
+		Message: fmt.Sprintf(
+			"The %s method is not supported for this route. Supported methods: %s.",
+			method, strings.Join(others, ", "),
+		),
 	}
 }
 
-// GetByMethod returns all routes registered for a given HTTP verb, domain
-// routes first).
-func (c *RouteCollection) GetByMethod(method string) []*Route {
-	return c.Get(method)
-}
-
-// Get mirrors the reference implementation. With a method it returns the
-// routes indexed for that method, domain routes first; without one it returns
-// the full collection.
-func (c *RouteCollection) Get(method ...string) []*Route {
-	if len(method) == 0 || method[0] == "" {
-		return c.GetRoutes()
-	}
-	return append(append([]*Route(nil), c.methodDomains[method[0]]...), c.methodRoutes[method[0]]...)
-}
-
-// GetRoutesByMethod returns all routes grouped by HTTP verb, domain routes
-// first.
-func (c *RouteCollection) GetRoutesByMethod() map[string][]*Route {
-	out := make(map[string][]*Route, len(c.methodRoutes)+len(c.methodDomains))
-	for method := range c.methodRoutes {
-		out[method] = c.Get(method)
-	}
-	for method := range c.methodDomains {
-		if _, ok := out[method]; !ok {
-			out[method] = c.Get(method)
-		}
-	}
-	return out
-}
-
-// GetRoutesByName returns all named routes.
-func (c *RouteCollection) GetRoutesByName() map[string]*Route {
-	out := make(map[string]*Route, len(c.byName))
-	for name, route := range c.byName {
-		out[name] = route
-	}
-	return out
-}
-
-// GetRoutes returns every registered route, domain routes first
-// .
-func (c *RouteCollection) GetRoutes() []*Route {
-	out := make([]*Route, 0, len(c.allDomains)+len(c.allRoutes))
-	out = append(out, c.allDomains...)
-	out = append(out, c.allRoutes...)
-	return out
-}
-
-// All is the Go-style spelling of GetRoutes.
-func (c *RouteCollection) All() []*Route {
+// Iterator returns all routes (the reference getIterator wraps the route list
+// in an ArrayIterator; returning the slice is the Go analog).
+func (c *RouteCollection) Iterator() []*Route {
 	return c.GetRoutes()
 }
 
-// Count returns the total number of registered routes.
+// Count counts the number of items in the collection (the reference
+// implementation Countable::count).
 func (c *RouteCollection) Count() int {
-	return len(c.allRoutes) + len(c.allDomains)
+	return len(c.GetRoutes())
 }
 
-// HasNamedRoute reports whether a route with the given name exists.
-func (c *RouteCollection) HasNamedRoute(name string) bool {
-	return c.GetByName(name) != nil
-}
-
-// ActionRoutePattern implements the action lookup used by the URL generator.
-func (c *RouteCollection) ActionRoutePattern(action string) (string, bool) {
-	route, ok := c.GetByAction(action)
-	if !ok || route == nil {
-		return "", false
+// isControllerActionHandler reports whether a route handler is a controller
+// action (value or pointer form, class-name string or instance controller) —
+// the Go analog of the reference action['controller'] key being present,
+// which RouteAction::parse sets for every controller action and never for
+// closures. Plain func handlers are therefore reported false.
+func isControllerActionHandler(handler any) bool {
+	switch h := handler.(type) {
+	case ControllerAction:
+		return true
+	case *ControllerAction:
+		return h != nil
 	}
-	return route.URI(), true
+	return false
 }
 
-// NamedRoutePattern implements NamedRouteSource for the collection.
-func (c *RouteCollection) NamedRoutePattern(name string) (string, bool) {
-	route := c.GetByName(name)
-	if route == nil {
-		return "", false
+// upsertRoute emulates the reference implementation insertion-ordered array
+// assignment $bucket[$key] = $route: an existing key is replaced in place
+// (keeping its position), a new key is appended in registration order.
+func upsertRoute(bucket *[]*Route, order map[string]int, key string, route *Route) {
+	if slot, ok := order[key]; ok {
+		(*bucket)[slot] = route
+		return
 	}
-	return route.URI(), true
+	order[key] = len(*bucket)
+	*bucket = append(*bucket, route)
 }
 
-// NamedRouteDomain returns the host/domain template of a named route if defined.
-func (c *RouteCollection) NamedRouteDomain(name string) (string, bool) {
-	route := c.GetByName(name)
-	if route == nil {
-		return "", false
+// orderFor lazily creates the per-method key→slot index used by upsertRoute.
+func orderFor(orders map[string]map[string]int, method string) map[string]int {
+	if idx, ok := orders[method]; ok {
+		return idx
 	}
-	return route.GetDomain(), route.GetDomain() != ""
+	idx := make(map[string]int)
+	orders[method] = idx
+	return idx
+}
+
+// requestPathOf renders the request path the way the reference implementation
+// exception messages do: the URI trimmed on both sides, with the root path
+// reported as "/".
+func requestPathOf(request *Request) string {
+	if trimmed := strings.Trim(request.GetPath(), "/"); trimmed != "" {
+		return trimmed
+	}
+	return "/"
 }
 
 // matchesPath reports whether the path matches any variant of the route,

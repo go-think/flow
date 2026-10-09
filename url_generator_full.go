@@ -27,8 +27,8 @@ func (r *router) RespondWithRoute(name string, request *Request) *Response {
 	if request == nil {
 		return NotFoundResponse()
 	}
-	params := route.Bind(request, request.Path())
-	return root.runRoute(request, route, params)
+	route.Bind(request)
+	return root.runRoute(request, route)
 }
 
 // GetValidators returns the default validator chain
@@ -58,13 +58,6 @@ func (r *Route) GetCompiled() []*compiledPattern {
 // spelling.
 func (r *Route) SetURI(uri string) *Route {
 	return r.SetUri(uri)
-}
-
-// ═══ RouteCollection 补齐 ═══
-
-// Iterator returns all routes.
-func (c *RouteCollection) Iterator() []*Route {
-	return c.All()
 }
 
 // ═══ UrlGenerator 补齐 ═══

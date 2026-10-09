@@ -5,25 +5,36 @@ import (
 	"sync"
 )
 
-// RouteCollectionInterface is the internal contract the router needs from a route
-// store. Both RouteCollection (live routes) and CompiledRouteCollection
-// (routes restored from the route cache plus dynamically added ones) satisfy
-// it.
+// RouteCollectionInterface is the internal contract the router needs from a
+// route store, mirroring the reference routeCollectionInterface plus the
+// Countable::count method. Both RouteCollection (live routes) and
+// CompiledRouteCollection (routes restored from the route cache plus
+// dynamically added ones) satisfy it.
 type RouteCollectionInterface interface {
+	// Add adds a Route instance to the collection.
 	Add(route *Route) *Route
-	Match(request *Request) (*Route, []*parameter, error)
-	All() []*Route
+	// RefreshNameLookups refreshes the name look-up table.
+	RefreshNameLookups()
+	// RefreshActionLookups refreshes the action look-up table.
+	RefreshActionLookups()
+	// Match finds the first route matching a given request; the bound
+	// parameters are mirrored onto the request.
+	Match(request *Request) (*Route, error)
+	// Get gets routes from the collection by method.
 	Get(method ...string) []*Route
-	GetByMethod(method string) []*Route
-	GetRoutes() []*Route
-	GetRoutesByMethod() map[string][]*Route
-	GetRoutesByName() map[string]*Route
-	GetByName(name string) *Route
-	GetByAction(action string) (*Route, bool)
+	// HasNamedRoute determines if the route collection contains a given named route.
 	HasNamedRoute(name string) bool
-	NamedRoutePattern(name string) (string, bool)
-	NamedRouteDomain(name string) (string, bool)
-	ReindexName(route *Route)
+	// GetByName gets a route instance by its name.
+	GetByName(name string) *Route
+	// GetByAction gets a route instance by its controller action.
+	GetByAction(action string) *Route
+	// GetRoutes gets all of the routes in the collection.
+	GetRoutes() []*Route
+	// GetRoutesByMethod gets all of the routes keyed by their HTTP verb / method.
+	GetRoutesByMethod() map[string][]*Route
+	// GetRoutesByName gets all of the routes keyed by their name.
+	GetRoutesByName() map[string]*Route
+	// Count counts the number of items in the collection.
 	Count() int
 }
 
@@ -72,8 +83,8 @@ func (c *CompiledRouteCollection) Add(route *Route) *Route {
 
 // Match finds the first route matching the request, cached routes first
 // .
-func (c *CompiledRouteCollection) Match(request *Request) (*Route, []*parameter, error) {
-	route, params := c.matchCached(request)
+func (c *CompiledRouteCollection) Match(request *Request) (*Route, error) {
+	route := c.matchCached(request)
 	if route == nil {
 		// ResourceNotFoundException|MethodNotAllowedException from
 		// the compiled matcher delegates to the dynamic routes; a dynamic
@@ -82,19 +93,19 @@ func (c *CompiledRouteCollection) Match(request *Request) (*Route, []*parameter,
 	}
 	if route.IsFallback() {
 		// A cached fallback never wins over a dynamic non-fallback match.
-		dynRoute, dynParams, err := c.dynamic.Match(request)
+		dynRoute, err := c.dynamic.Match(request)
 		if err == nil && dynRoute != nil && !dynRoute.IsFallback() {
-			return dynRoute, dynParams, err
+			return dynRoute, err
 		}
 	}
-	return route, params, nil
+	return route, nil
 }
 
 // matchCached matches the cached routes with the trailing slashes trimmed off
 // the request path.
 // A verb mismatch among cached routes defers to the dynamic routes, like the
 // MethodNotAllowedException branch.
-func (c *CompiledRouteCollection) matchCached(request *Request) (*Route, []*parameter) {
+func (c *CompiledRouteCollection) matchCached(request *Request) *Route {
 	c.mu.RLock()
 	cached := c.cached
 	c.mu.RUnlock()
@@ -112,21 +123,31 @@ func (c *CompiledRouteCollection) matchCached(request *Request) (*Route, []*para
 	dup.ctx = request.ctx
 
 	routes := cachedForMethod(cached, dup.GetMethod())
-	route := matchAgainstRoutes(routes, dup, true)
+	route := c.dynamic.matchAgainstRoutes(routes, dup, true)
 	if route == nil {
-		return nil, nil
+		return nil
 	}
-	return route, route.Bind(dup, trimmed)
+	// The reference passes the trimmed duplicate forward and binds it; flow
+	// keeps the original request flowing, so the parameters bound against
+	// the trimmed path are mirrored back onto it (the mirror is what
+	// Run/middlewares read — without this, cached routes would dispatch with
+	// empty parameters).
+	params := route.Bind(dup)
+	for _, p := range params {
+		request.SetRouteParam(p.name, p.value)
+	}
+	request.SetOriginalParams(params)
+	return route
 }
 
 // Get returns the routes for a verb with dynamic routes taking precedence
 // over cached routes with the same domain+uri (merged lookups).
 func (c *CompiledRouteCollection) Get(method ...string) []*Route {
+	if len(method) == 0 {
+		return c.GetRoutes()
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if len(method) == 0 || method[0] == "" {
-		return c.All()
-	}
 	verb := method[0]
 	seen := make(map[string]bool, len(c.cached))
 	out := make([]*Route, 0, len(c.cached))
@@ -145,9 +166,9 @@ func (c *CompiledRouteCollection) Get(method ...string) []*Route {
 	return out
 }
 
-// All returns the cached routes followed by the dynamic additions
+// GetRoutes returns the cached routes followed by the dynamic additions
 // .
-func (c *CompiledRouteCollection) All() []*Route {
+func (c *CompiledRouteCollection) GetRoutes() []*Route {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	seen := make(map[string]bool, len(c.cached))
@@ -160,7 +181,7 @@ func (c *CompiledRouteCollection) All() []*Route {
 		seen[key] = true
 		out = append(out, route)
 	}
-	for _, route := range c.dynamic.All() {
+	for _, route := range c.dynamic.GetRoutes() {
 		key := route.GetDomain() + route.URI()
 		if seen[key] {
 			// Dynamic routes take precedence over cached routes with the
@@ -179,16 +200,11 @@ func (c *CompiledRouteCollection) All() []*Route {
 	return out
 }
 
-// GetRoutes is an alias of All.
-func (c *CompiledRouteCollection) GetRoutes() []*Route {
-	return c.All()
-}
-
 // GetRoutesByMethod groups the routes by verb
 // .
 func (c *CompiledRouteCollection) GetRoutesByMethod() map[string][]*Route {
 	out := make(map[string][]*Route)
-	for _, route := range c.All() {
+	for _, route := range c.GetRoutes() {
 		for _, verb := range route.Methods() {
 			out[verb] = append(out[verb], route)
 		}
@@ -199,7 +215,7 @@ func (c *CompiledRouteCollection) GetRoutesByMethod() map[string][]*Route {
 // GetRoutesByName indexes the routes by name.
 func (c *CompiledRouteCollection) GetRoutesByName() map[string]*Route {
 	out := make(map[string]*Route)
-	for _, route := range c.All() {
+	for _, route := range c.GetRoutes() {
 		if name := route.GetName(); name != "" {
 			if _, ok := out[name]; !ok {
 				out[name] = route
@@ -228,13 +244,13 @@ func (c *CompiledRouteCollection) GetByName(name string) *Route {
 
 // GetByAction resolves a route by its controller action string
 // .
-func (c *CompiledRouteCollection) GetByAction(action string) (*Route, bool) {
-	for _, route := range c.All() {
+func (c *CompiledRouteCollection) GetByAction(action string) *Route {
+	for _, route := range c.GetRoutes() {
 		if route.ActionName() == action {
-			return route, true
+			return route
 		}
 	}
-	return nil, false
+	return nil
 }
 
 // HasNamedRoute reports whether a route with the name exists
@@ -244,30 +260,20 @@ func (c *CompiledRouteCollection) HasNamedRoute(name string) bool {
 	return c.GetByName(name) != nil
 }
 
-// NamedRoutePattern returns the raw pattern of a named route.
-func (c *CompiledRouteCollection) NamedRoutePattern(name string) (string, bool) {
-	route := c.GetByName(name)
-	if route == nil {
-		return "", false
-	}
-	return route.URI(), true
+// RefreshNameLookups refreshes the name look-up table of the DYNAMIC
+// sub-collection. The reference compiledRouteCollection makes this a no-op
+// (routes never change after the cache is written), but flow's fluent
+// registration sets names after Add, so post-restore routes need their
+// dynamic index refreshed.
+func (c *CompiledRouteCollection) RefreshNameLookups() {
+	c.dynamic.RefreshNameLookups()
 }
 
-// NamedRouteDomain returns the domain template of a named route when set.
-func (c *CompiledRouteCollection) NamedRouteDomain(name string) (string, bool) {
-	route := c.GetByName(name)
-	if route == nil {
-		return "", false
-	}
-	return route.GetDomain(), route.GetDomain() != ""
-}
-
-// ReindexName refreshes the name/action indexes of the DYNAMIC sub-collection.
-// the reference compiledRouteCollection makes this a no-op (routes never change
-// after the cache is written), but flow's fluent registration sets names
-// after Add, so post-restore routes need their dynamic index refreshed.
-func (c *CompiledRouteCollection) ReindexName(route *Route) {
-	c.dynamic.ReindexName(route)
+// RefreshActionLookups refreshes the action look-up table of the DYNAMIC
+// sub-collection, the same flow-specific deviation from the reference no-op
+// as RefreshNameLookups.
+func (c *CompiledRouteCollection) RefreshActionLookups() {
+	c.dynamic.RefreshActionLookups()
 }
 
 // Count returns the total number of routes (cached + dynamic).
@@ -297,10 +303,4 @@ func rawRequestPath(request *Request) string {
 		}
 	}
 	return request.GetPath()
-}
-
-// GetByMethod returns the routes for one verb (alias of Get with a single,
-// mandatory verb argument).
-func (c *CompiledRouteCollection) GetByMethod(method string) []*Route {
-	return c.Get(method)
 }

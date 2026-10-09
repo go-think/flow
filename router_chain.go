@@ -223,7 +223,8 @@ func (r *router) routeChainFor(route *Route) Router {
 // afterwards.
 func (c *routeChain) Name(name string) Router {
 	c.route.Name(name)
-	c.router.collection.ReindexName(c.route)
+	c.router.collection.RefreshNameLookups()
+	c.router.collection.RefreshActionLookups()
 	return c
 }
 

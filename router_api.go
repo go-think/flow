@@ -89,4 +89,3 @@ func (r *router) SetImplicitBindingResolver(fn func(route *Route, key, value str
 func (r *router) SubstituteImplicitBindingsUsing(fn func(route *Route, key, value string) any) {
 	r.SetImplicitBindingResolver(fn)
 }
-

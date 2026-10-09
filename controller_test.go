@@ -312,4 +312,3 @@ func TestControllerActionPointerDispatch(t *testing.T) {
 	assert.Equal(t, 200, resp.StatusCode())
 	assert.Equal(t, "show:99", resp.GetContent())
 }
-

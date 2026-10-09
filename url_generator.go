@@ -355,11 +355,9 @@ func fillValue(supplied, def string) string {
 }
 
 // routeEntity resolves the underlying *Route for a named route when the route
-// source can provide it (the built-in router and route collections can).
+// source can provide it (the built-in router can).
 func (u *UrlGenerator) routeEntity(name string) *Route {
 	switch src := u.routes.(type) {
-	case *RouteCollection:
-		return src.GetByName(name)
 	case interface {
 		Routes() RouteCollectionInterface
 	}:

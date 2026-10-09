@@ -130,7 +130,7 @@ func TestCompat_OptionalRoutesEnumerateOnce(t *testing.T) {
 	r := NewRouter(nil, nil)
 	r.Get("/optional/{id?}", func(ctx Context) Response { return ctx.String(200, "ok") })
 
-	routes := r.Routes().GetByMethod(http.MethodGet)
+	routes := r.Routes().Get(http.MethodGet)
 	assert.Len(t, routes, 1)
 }
 
@@ -168,6 +168,23 @@ func TestCompat_DynamicSubdomainRoute(t *testing.T) {
 	reqMismatch := httptest.NewRequest(http.MethodGet, "http://otherdomain.com/profile", nil)
 	respMismatch := r.Dispatch(reqMismatch)
 	assert.Equal(t, http.StatusNotFound, respMismatch.StatusCode())
+}
+
+// TestCompat_DynamicSubdomainRouteParameterOrder verifies that positional
+// handler arguments on a dynamic-domain route receive host parameters first,
+// then path parameters — matching the reference binder's merge order
+// (RouteParameterBinder::bindHostParameters merges host matches ahead of the
+// path parameters) that Bind and ParameterNames both declare.
+func TestCompat_DynamicSubdomainRouteParameterOrder(t *testing.T) {
+	r := NewRouter(nil, nil)
+
+	r.Domain("{account}.myapp.com").Get("/users/{user}", func(account, user string) string {
+		return account + "|" + user
+	})
+
+	resp := r.Dispatch(httptest.NewRequest(http.MethodGet, "http://tenant1.myapp.com/users/42", nil))
+	assert.Equal(t, http.StatusOK, resp.StatusCode())
+	assert.Equal(t, "tenant1|42", resp.Body())
 }
 
 func TestCompat_DynamicSubdomainWhereConstraint(t *testing.T) {
@@ -310,7 +327,7 @@ func TestCompat_UrlGeneratorAndRedirectorAction(t *testing.T) {
 
 	r.Get("/user/details/{id}", (&dummyController{}).Show).Name("user.show")
 
-	urlGen := NewUrlGenerator(r.Routes(), "https://example.com")
+	urlGen := NewUrlGenerator(r, "https://example.com")
 
 	// Test Action URL lookup
 	url, err := urlGen.Action("dummyController.Show", map[string]string{"id": "42"})
@@ -439,7 +456,7 @@ func TestCompat_UrlGeneratorDomainAndAbsolute(t *testing.T) {
 		return ctx.String(http.StatusOK, "post")
 	}).Name("tenant.posts.show")
 
-	ug := NewUrlGenerator(r.Routes(), "https://app.com")
+	ug := NewUrlGenerator(r, "https://app.com")
 
 	// 1. Default absolute URL with domain parameter substitution
 	urlAbs, err := ug.Route("tenant.posts.show", map[string]string{
@@ -531,4 +548,31 @@ func TestCompat_PrefixedResource(t *testing.T) {
 		}
 	}
 	assert.True(t, foundIndex)
+}
+
+// TestCompat_QueryVerbRoute verifies the QUERY verb registration and dispatch
+// (the reference Router::$verbs includes QUERY and Router::query registers a
+// route against it).
+func TestCompat_QueryVerbRoute(t *testing.T) {
+	r := NewRouter(nil, nil)
+	r.Query("/search", func(ctx Context) string {
+		return "query result"
+	})
+
+	resp := r.Dispatch(httptest.NewRequest("QUERY", "/search", nil))
+	assert.Equal(t, http.StatusOK, resp.StatusCode())
+	assert.Equal(t, "query result", resp.Body())
+}
+
+// TestCompat_AnyIncludesQueryVerb verifies Any() registers the QUERY verb as
+// well (the reference any() registers against every Router::$verbs entry).
+func TestCompat_AnyIncludesQueryVerb(t *testing.T) {
+	r := NewRouter(nil, nil)
+	r.Any("/catch-all", func(ctx Context) string {
+		return "any"
+	})
+
+	resp := r.Dispatch(httptest.NewRequest("QUERY", "/catch-all", nil))
+	assert.Equal(t, http.StatusOK, resp.StatusCode())
+	assert.Equal(t, "any", resp.Body())
 }

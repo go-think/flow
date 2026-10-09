@@ -180,4 +180,3 @@ func TestRouter_SubstituteImplicitBindingsUsing(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode())
 	assert.Equal(t, "resolved-acct100", resp.GetContent())
 }
-

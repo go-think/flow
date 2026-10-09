@@ -136,4 +136,3 @@ func TestRouteRegistrar_DefaultsAndMetadata(t *testing.T) {
 		t.Fatalf("expected 'en:localization', got '%s'", resp.GetContent())
 	}
 }
-

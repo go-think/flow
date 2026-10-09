@@ -10,6 +10,23 @@ import (
 // The following methods extend the Route entity with the the reference implementation-compatible
 // parameter bag, action accessors, authorization and atomic-lock API.
 
+// getAction returns the route action as the reference-shaped attribute bag
+// the look-ups consume: "uses" carries the action (the handler), and
+// "controller" carries the "Controller@method" identifier for controller
+// actions — mirroring the reference RouteAction::parse, which sets that key
+// for every controller action and never for closures.
+func (r *Route) getAction() map[string]any {
+	action := map[string]any{"uses": nil}
+	if r == nil {
+		return action
+	}
+	action["uses"] = r.handler
+	if isControllerActionHandler(r.handler) {
+		action["controller"] = r.ActionName()
+	}
+	return action
+}
+
 // GetAction returns the route handler, or a specific field from a
 // ControllerAction when key is "controller"/"method".
 func (r *Route) GetAction(key ...string) any {
