@@ -11,8 +11,6 @@ import (
 // serializable (cacheable) routes and domain-restricted URL generation.
 type domainTestController struct{}
 
-func (c *domainTestController) Middleware() []ControllerMiddleware { return nil }
-
 func (c *domainTestController) Index() string { return "items" }
 
 func TestRestoreCompiledDynamicPrecedence(t *testing.T) {

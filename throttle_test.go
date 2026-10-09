@@ -272,10 +272,9 @@ func TestThrottle_NamedLimiterMissingPanics(t *testing.T) {
 }
 
 func TestThrottle_NamedLimiterMissingWithExplicitPolicyPanics(t *testing.T) {
-	// the reference implementation ( + resolveMaxAttempts L207-211): a
-	// non-numeric limiter name that is not registered always throws
-	// MissingRateLimiterException — even when an explicit maxAttempts was
-	// provided alongside; there is no silent fallback to the plain policy.
+	// A non-numeric limiter name that is not registered always panics with
+	// MissingRateLimiterError — even when an explicit maxAttempts was provided
+	// alongside; there is no silent fallback to the plain policy.
 	rl := NewMemoryRateLimiter()
 	h := NewThrottleMiddlewareNamed(rl, "flow-test-fallback", 1, time.Minute)
 
@@ -293,10 +292,9 @@ func TestThrottle_NamedLimiterMissingWithExplicitPolicyPanics(t *testing.T) {
 }
 
 func TestThrottle_NumericSpecInNameSlotIsPlainPolicy(t *testing.T) {
-	// A numeric spec ("3", "4,2") is not a limiter name (the reference implementation:
-	// is_numeric maxAttempts parameter of throttle:60,1): it never triggers
-	// the MissingRateLimiter panic and resolves as a plain maxAttempts policy
-	// from the first numeric segment.
+	// A numeric spec ("3", "4,2") is not a limiter name: it never triggers the
+	// MissingRateLimiter panic and resolves as a plain maxAttempts policy from
+	// the first numeric segment.
 	for _, tc := range []struct{ spec, limit string }{{"3", "3"}, {"4,2", "4"}} {
 		h := NewThrottleMiddlewareNamed(NewMemoryRateLimiter(), tc.spec, 0, time.Minute)
 		next, _ := throttleNext()
@@ -388,15 +386,14 @@ func TestThrottle_MemoryBackendIsAvailableByDefault(t *testing.T) {
 // --- Begin throttle alignment tests ---
 
 func TestForMissingRateLimiterMessage(t *testing.T) {
-	// —
-	// "Rate limiter [name] is not defined."
+	// The message reads "Rate limiter [name] is not defined.".
 	assert.Equal(t, "Rate limiter [gold] is not defined.", ForMissingRateLimiter("gold").Error())
 	assert.Equal(t, "Rate limiter [App\\Models\\User::gold] is not defined.", ForMissingRateLimiterAndUser("gold", "App\\Models\\User").Error())
 }
 
 func TestThrottleRequestsExceptionRender(t *testing.T) {
-	// ThrottleRequestsException('Too Many Attempts.', headers) is a
-	// 429 HttpException carrying Retry-After and the X-RateLimit-* headers.
+	// ThrottleRequestsException renders a 429 response carrying Retry-After and
+	// the X-RateLimit-* headers.
 	exception := &ThrottleRequestsException{
 		Message:    "Too Many Attempts.",
 		RetryAfter: 30,

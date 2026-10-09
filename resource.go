@@ -14,9 +14,8 @@ type resourceVerb struct {
 	hasParam bool   // whether the route carries the resource id parameter
 }
 
-// resourceVerbs lists the seven conventional resource actions in order
-// (reference defaults — index, create, store, show, edit, update,
-// destroy).
+// resourceVerbs lists the seven conventional resource actions in order:
+// index, create, store, show, edit, update, destroy.
 var resourceVerbs = []resourceVerb{
 	{action: "Index", method: "GET", uri: "", hasParam: false},
 	{action: "Create", method: "GET", uri: "/create", hasParam: false},
@@ -28,23 +27,23 @@ var resourceVerbs = []resourceVerb{
 }
 
 // singletonResourceVerbs lists the actions of a singleton resource (no id
-// parameter; singleton defaults — show, edit, update).
+// parameter): show, edit, update.
 var singletonResourceVerbs = []resourceVerb{
 	{action: "Show", method: "GET", uri: "", hasParam: false},
 	{action: "Edit", method: "GET", uri: "/edit", hasParam: false},
 	{action: "Update", method: "PUT,PATCH", uri: "", hasParam: false},
 }
 
-// singletonCreatableVerbs appends to the singleton defaults for creatable
-// singletons).
+// singletonCreatableVerbs are the extra actions registered for creatable
+// singletons.
 var singletonCreatableVerbs = []resourceVerb{
 	{action: "Create", method: "GET", uri: "/create", hasParam: false},
 	{action: "Store", method: "POST", uri: "", hasParam: false},
 	{action: "Destroy", method: "DELETE", uri: "", hasParam: false},
 }
 
-// singletonDestroyableVerb appends for destroyable-only singletons
-// ).
+// singletonDestroyableVerb is the extra action registered for destroyable-only
+// singletons.
 var singletonDestroyableVerb = resourceVerb{action: "Destroy", method: "DELETE", uri: "", hasParam: false}
 
 // ResourceOptions restrict and customize a resource registration.
@@ -71,10 +70,10 @@ type ResourceOptions struct {
 	Metadata             map[string]any
 }
 
-// applies mirrors the reference getResourceMethods: the only list is intersected
-// first (user Only overrides the API default), then the except list is
-// subtracted. Action names are matched case-sensitively after the user-provided
-// entries are normalized to the canonical capitalized action form (see
+// applies reports whether the action is enabled: the only list is applied first
+// (user Only overrides the API default), then the except list is subtracted.
+// Action names are matched case-sensitively after the user-provided entries are
+// normalized to the canonical capitalized action form (see
 // normalizeResourceAction).
 func (o *ResourceOptions) applies(action string) bool {
 	only := o.Only
@@ -92,10 +91,8 @@ func (o *ResourceOptions) applies(action string) bool {
 
 // normalizeResourceAction maps a user-provided resource action name to the
 // canonical capitalized form used by the verb tables ("index" → "Index",
-// "show" → "Show"). the reference implementation compares action names case-sensitively
-// ( — array_intersect/in_array), so
-// beyond this single normalization the comparison is exact: "INDEX" does not
-// match "Index".
+// "show" → "Show"). Beyond this single normalization the comparison is exact:
+// "INDEX" does not match "Index".
 func normalizeResourceAction(action string) string {
 	if action == "" {
 		return action
@@ -106,9 +103,7 @@ func normalizeResourceAction(action string) string {
 }
 
 // containsAction reports whether the list contains the action after each entry
-// is normalized to the canonical capitalized action form and compared exactly
-// (the reference implementation: array_intersect/in_array — case-sensitive beyond the normalization
-// of the conventional lower-case action spellings).
+// is normalized to the canonical capitalized action form and compared exactly.
 func containsAction(list []string, action string) bool {
 	for _, v := range list {
 		if normalizeResourceAction(v) == action {
@@ -127,20 +122,18 @@ type PendingResourceRegistration struct {
 	options    ResourceOptions
 	singleton  bool
 	registered bool
-	// trashedRequested distinguishes an explicit WithTrashed() call from no
-	// call at all — an empty list still
-	// counts as requested, while no call never applies withTrashed).
+	// trashedRequested distinguishes an explicit WithTrashed() call from no call
+	// at all — an empty list still counts as requested, while no call never
+	// applies withTrashed.
 	trashedRequested bool
 }
 
 // ResourceOption mutates the options of a resource registration. It is passed
-// variadically to Resource/APIResource/Singleton/... like the reference implementation
-// options argument.
+// variadically to Resource/APIResource/Singleton/...
 type ResourceOption func(*ResourceOptions)
 
-// WithBaseName sets the base route name of the resource, the string form of
-// the reference names option: the final name becomes "prefix.base.action"
-// ).
+// WithBaseName sets the base route name of the resource; the final name becomes
+// "prefix.base.action".
 func WithBaseName(base string) ResourceOption {
 	return func(o *ResourceOptions) {
 		o.BaseName = base
@@ -157,9 +150,8 @@ func applyResourceOptions(o *ResourceOptions, options []ResourceOption) {
 }
 
 // uniqueMiddleware removes duplicate middleware entries, keeping the first
-// occurrence. Only comparable scalar
-// entries (e.g. strings) are deduplicated, mirroring the reference implementation where object
-// instances are compared by identity.
+// occurrence. Only comparable scalar entries (e.g. strings) are deduplicated;
+// other entries are compared by identity.
 func uniqueMiddleware(middleware []any) []any {
 	result := make([]any, 0, len(middleware))
 	for _, item := range middleware {
@@ -194,20 +186,16 @@ func (p *PendingResourceRegistration) Only(actions ...string) *PendingResourceRe
 	return p
 }
 
-// Except removes the given actions from the resource
-// (the reference implementation: — array_diff after the only
-// intersection, so it composes with the API default list).
+// Except removes the given actions from the resource. It is applied after the
+// only intersection, so it composes with the API default list.
 func (p *PendingResourceRegistration) Except(actions ...string) *PendingResourceRegistration {
 	p.options.Except = actions
 	return p
 }
 
-// Middleware attaches middleware to every resource route, replacing any
-// previous middleware.
-// Per-action lists registered with MiddlewareFor are re-merged with the new
-// base, the per-action entries first
-// (the reference implementation:, options['middleware_for']
-// = unique merge of the base list with the per-action list).
+// Middleware attaches middleware to every resource route, replacing any previous
+// middleware. Per-action lists registered with MiddlewareFor are re-merged with
+// the new base, the per-action entries first, deduplicated.
 func (p *PendingResourceRegistration) Middleware(middleware ...any) *PendingResourceRegistration {
 	p.options.Middleware = middleware
 	for action, forMiddleware := range p.options.MiddlewareFor {
@@ -218,10 +206,8 @@ func (p *PendingResourceRegistration) Middleware(middleware ...any) *PendingReso
 }
 
 // MiddlewareFor attaches middleware to specific actions of the resource. The
-// base middleware is merged in front of the action-specific one and the list
-// is deduplicated, replacing any previous list for those actions
-// (the reference implementation: —
-// unique merge of the base middleware with the per-action middleware).
+// base middleware is merged in front of the action-specific one and the list is
+// deduplicated, replacing any previous list for those actions.
 func (p *PendingResourceRegistration) MiddlewareFor(actions []string, middleware ...any) *PendingResourceRegistration {
 	if len(p.options.Middleware) > 0 {
 		middleware = uniqueMiddleware(append(append([]any(nil), p.options.Middleware...), middleware...))
@@ -242,8 +228,7 @@ func (p *PendingResourceRegistration) WithoutMiddleware(middleware ...any) *Pend
 }
 
 // WithoutMiddlewareFor excludes middleware from specific actions of the
-// resource, replacing the previous list for those actions
-// .
+// resource, replacing the previous list for those actions.
 func (p *PendingResourceRegistration) WithoutMiddlewareFor(actions []string, middleware ...any) *PendingResourceRegistration {
 	if p.options.WithoutMiddlewareFor == nil {
 		p.options.WithoutMiddlewareFor = make(map[string][]any)
@@ -284,20 +269,15 @@ func (p *PendingResourceRegistration) Destroyable() *PendingResourceRegistration
 
 // WithTrashed enables trashed entity binding on the resource routes. Without
 // arguments the member actions (show/edit/update) are marked; with arguments
-// only the listed actions are (the reference implementation: withTrashed — empty means
-// an intersection of the method list with show/edit/update). The flag is
-// only applied when WithTrashed was actually called
-// ), and never
-// on singleton resources.
+// only the listed actions are. The flag is only applied when WithTrashed was
+// actually called, and never on singleton resources.
 func (p *PendingResourceRegistration) WithTrashed(methods ...string) *PendingResourceRegistration {
 	p.options.Trashed = methods
 	p.trashedRequested = true
 	return p
 }
 
-// As prefixes every generated route name; the prefix is joined with a dot
-// (the reference implementation: options['as'] injected via RouteRegistrar attributes —
-// (the prefix is joined with a dot).
+// As prefixes every generated route name with the given prefix, joined by a dot.
 func (p *PendingResourceRegistration) As(prefix string) *PendingResourceRegistration {
 	p.options.NamePrefix = prefix
 	return p
@@ -310,8 +290,7 @@ func (p *PendingResourceRegistration) BaseName(base string) *PendingResourceRegi
 	return p
 }
 
-// WhereNumber adds a numeric regex constraint to the given resource parameters
-// .
+// WhereNumber adds a numeric regex constraint to the given resource parameters.
 func (p *PendingResourceRegistration) WhereNumber(names ...string) *PendingResourceRegistration {
 	return p.assignWheres("[0-9]+", names)
 }
@@ -328,20 +307,17 @@ func (p *PendingResourceRegistration) WhereAlphaNumeric(names ...string) *Pendin
 	return p.assignWheres("[a-zA-Z0-9]+", names)
 }
 
-// WhereUuid adds a UUID regex constraint to the given resource parameters
-// .
+// WhereUuid adds a UUID regex constraint to the given resource parameters.
 func (p *PendingResourceRegistration) WhereUuid(names ...string) *PendingResourceRegistration {
 	return p.assignWheres(`[\da-fA-F]{8}-[\da-fA-F]{4}-[\da-fA-F]{4}-[\da-fA-F]{4}-[\da-fA-F]{12}`, names)
 }
 
-// WhereUlid adds a ULID regex constraint to the given resource parameters
-// .
+// WhereUlid adds a ULID regex constraint to the given resource parameters.
 func (p *PendingResourceRegistration) WhereUlid(names ...string) *PendingResourceRegistration {
 	return p.assignWheres(`[0-7][0-9a-hjkmnp-tv-zA-HJKMNP-TV-Z]{25}`, names)
 }
 
-// WhereIn adds an allowed values constraint to a resource parameter
-// .
+// WhereIn adds an allowed values constraint to a resource parameter.
 func (p *PendingResourceRegistration) WhereIn(name string, allowed []string) *PendingResourceRegistration {
 	return p.Where(map[string]string{name: strings.Join(allowed, "|")})
 }
@@ -362,8 +338,8 @@ func (p *PendingResourceRegistration) Missing(callback func(req *Request, err er
 	return p
 }
 
-// Scoped enables scoped child model bindings on nested resource routes
-// . Optionally accepts field mappings.
+// Scoped enables scoped child model bindings on nested resource routes.
+// Optionally accepts field mappings.
 func (p *PendingResourceRegistration) Scoped(fields ...map[string]string) *PendingResourceRegistration {
 	p.options.Scoped = true
 	if len(fields) > 0 && fields[0] != nil {
@@ -377,8 +353,7 @@ func (p *PendingResourceRegistration) Scoped(fields ...map[string]string) *Pendi
 	return p
 }
 
-// Metadata associates metadata with each generated resource route
-// .
+// Metadata associates metadata with each generated resource route.
 func (p *PendingResourceRegistration) Metadata(metadata map[string]any) *PendingResourceRegistration {
 	if p.options.Metadata == nil {
 		p.options.Metadata = make(map[string]any)
@@ -468,8 +443,8 @@ func (p *PendingResourceRegistration) register() {
 				return override
 			}
 		}
-		// the reference resourceRegistrar converts hyphens in wildcard names to
-		// underscores after singularization (getResourceWildcard).
+		// Hyphens in the wildcard name are converted to underscores after
+		// singularization.
 		return strings.ReplaceAll(singularize(strings.ReplaceAll(seg, "-", "_"), effectiveParams, p.singular()), "-", "_")
 	}
 
@@ -509,9 +484,8 @@ func (p *PendingResourceRegistration) register() {
 		if rv.hasParam && !p.singleton {
 			idSegment := fmt.Sprintf(rv.uri, "{"+param+"}")
 			if p.options.Shallow && isNestedResource(p.name) {
-				// Shallow member routes keep the URI prefix of the resource
-				// (the reference implementation registers shallow members inside the same prefixed
-				// group, dropping only the parent id parameters).
+				// Shallow member routes keep the URI prefix of the resource,
+				// dropping only the parent id parameters.
 				routePath = prefixPath + "/" + lastSegment(resourceName) + idSegment
 			} else {
 				routePath = path + idSegment
@@ -520,8 +494,7 @@ func (p *PendingResourceRegistration) register() {
 			routePath = path + rv.uri
 		}
 
-		// Verb overrides apply to the create/edit URI suffixes only
-		//.
+		// Verb overrides apply to the create/edit URI suffixes only.
 		if override, ok := p.verbsMap()[strings.ToLower(rv.action)]; ok && (rv.action == "Create" || rv.action == "Edit") {
 			if rv.action == "Create" {
 				routePath = path + "/" + override
@@ -533,8 +506,7 @@ func (p *PendingResourceRegistration) register() {
 		}
 
 		routeName := p.routeName(rv.action)
-		// the reference implementation ( setResourceBindingFields):
-		// the binding fields are extracted per route from the parameters that
+		// The binding fields are extracted per route from the parameters that
 		// actually occur in its URI — collection routes (index/store/create)
 		// carry no placeholder and receive none.
 		uriParams := routeURIParameters(routePath)
@@ -597,8 +569,7 @@ func (p *PendingResourceRegistration) register() {
 			}
 		} else if rChild, ok := child.(*router); ok {
 			if len(p.options.ScopedFields) > 0 {
-				// Same URI-based filtering as the route branch above
-				//.
+				// Same URI-based filtering as the route branch above.
 				if rChild.bindingFields == nil {
 					rChild.bindingFields = make(map[string]string)
 				}
@@ -627,10 +598,8 @@ func (p *PendingResourceRegistration) register() {
 }
 
 // routeURIParameters extracts the placeholder names occurring in a route URI,
-// e.g. "/users/{user}/posts/{post}" → {"user", "post"} (the reference implementation:
-// setResourceBindingFields —
-// a placeholder scan over the route URI). Like the raw scan,
-// an optional placeholder keeps its "?" suffix ("{post?}" → "post?").
+// e.g. "/users/{user}/posts/{post}" → {"user", "post"}. An optional placeholder
+// keeps its "?" suffix ("{post?}" → "post?").
 func routeURIParameters(uri string) map[string]struct{} {
 	params := make(map[string]struct{})
 	for i := 0; i < len(uri); i++ {
@@ -658,9 +627,8 @@ func middlewareForAction(m map[string][]any, action string) ([]any, bool) {
 }
 
 // routeName resolves the route name of an action: the explicit override when
-// present, otherwise "prefix.base.action" (the reference implementation: getResourceRouteName —
-// the per-method names entry wins, then a string names value replaces the
-// base, then the resource name; the "as" option becomes "as." prefix).
+// present, otherwise "prefix.base.action". A per-action names entry wins, then
+// a base name, then the resource name; the name prefix becomes an "as." prefix.
 func (p *PendingResourceRegistration) routeName(action string) string {
 	if name, ok := p.options.Names[action]; ok {
 		return name
@@ -672,7 +640,7 @@ func (p *PendingResourceRegistration) routeName(action string) string {
 	if slashIdx := strings.LastIndex(name, "/"); slashIdx != -1 {
 		name = name[slashIdx+1:]
 	}
-	// the reference implementation keeps the complete dotted resource name for collection routes.
+	// The complete dotted resource name is kept for collection routes.
 	// Only the member routes of a shallow nested resource use the final
 	// resource segment as their route-name base. The singleton show route is
 	// not shallow-named.
@@ -682,8 +650,7 @@ func (p *PendingResourceRegistration) routeName(action string) string {
 			name = name[idx+1:]
 		}
 	}
-	// A string names value replaces the resource name entirely
-	//.
+	// A base name replaces the resource name entirely.
 	if p.options.BaseName != "" {
 		name = p.options.BaseName
 	}
@@ -694,11 +661,10 @@ func (p *PendingResourceRegistration) routeName(action string) string {
 	return prefix + name + "." + strings.ToLower(action)
 }
 
-// trashedApplies reports whether the action receives the withTrashed flag.
-// Like the reference implementation, the flag is only applied when
-// WithTrashed was actually called, to the listed actions or — with an empty
-// list — to the member actions (show/edit/update). Singleton registrations
-// never apply it (they have no trashed handling).
+// trashedApplies reports whether the action receives the withTrashed flag. The
+// flag is only applied when WithTrashed was actually called, to the listed
+// actions or — with an empty list — to the member actions (show/edit/update).
+// Singleton registrations never apply it (they have no trashed handling).
 func (p *PendingResourceRegistration) trashedApplies(action string) bool {
 	if !p.trashedRequested || p.singleton {
 		return false
@@ -709,10 +675,9 @@ func (p *PendingResourceRegistration) trashedApplies(action string) bool {
 	return containsAction(p.options.Trashed, action)
 }
 
-// missingApplies reports whether the action receives the missing callback.
-// the reference implementation unsets options['missing'] for the collection actions index/create/
-// store of a resource (,318,338) and for the
-// singleton create/store/show (,456,475).
+// missingApplies reports whether the action receives the missing callback. The
+// callback is skipped for the collection actions index/create/store of a
+// resource and for the singleton create/store/show.
 func (p *PendingResourceRegistration) missingApplies(action string) bool {
 	if p.singleton {
 		return !containsAction([]string{"Create", "Store", "Show"}, action)
@@ -742,8 +707,7 @@ func isNestedResource(name string) bool {
 	return strings.Contains(name, ".")
 }
 
-// irregularPlurals maps common irregular English plurals to their singular form
-// .
+// irregularPlurals maps common irregular English plurals to their singular form.
 var irregularPlurals = map[string]string{
 	"categories": "category",
 	"queries":    "query",
@@ -761,8 +725,7 @@ var irregularPlurals = map[string]string{
 	"buses":      "bus",
 }
 
-// GetResourceWildcard returns the singular form of a resource name
-// .
+// GetResourceWildcard returns the singular form of a resource name.
 func GetResourceWildcard(name string) string {
 	return singularize(name, nil, true)
 }

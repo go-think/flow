@@ -44,8 +44,8 @@ func TestRedirectorBack(t *testing.T) {
 	store := session.NewStore("t", &session.CookieHandler{})
 	rd := NewRedirector(ug)
 
-	// No previous URL: the "/" fallback applies (trailing slash trimmed like
-	// the reference format).
+	// No previous URL: the "/" fallback applies, with the trailing slash
+	// trimmed.
 	assert.Equal(t, "https://example.test", rd.Back("").Headers().Get("Location"))
 
 	// A recorded previous URL wins and passes through untouched.

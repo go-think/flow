@@ -483,8 +483,8 @@ func TestFormatAppliesFormatterCallbacks(t *testing.T) {
 }
 
 func TestUrlGeneratorMissingRouteMessage(t *testing.T) {
-	// the reference implementation message casing and punctuation: "Route [x] not defined."
-	// () and "Action [x] not defined.".
+	// Error message casing and punctuation: "Route [x] not defined."
+	// and "Action [x] not defined.".
 	r := New(nil, nil)
 	r.Register()
 	ug := NewUrlGenerator(r, "")
@@ -496,23 +496,23 @@ func TestUrlGeneratorMissingRouteMessage(t *testing.T) {
 	assert.EqualError(t, err, "Action [MissingController@index] not defined.")
 }
 
-func TestSignatureHasNotExpiredPhpSemantics(t *testing.T) {
+func TestSignatureHasNotExpiredSemantics(t *testing.T) {
 	req := func(rawQuery string) *Request {
 		httpReq, _ := http.NewRequest("GET", "/p?"+rawQuery, nil)
 		return NewRequest(httpReq)
 	}
 	ug := NewUrlGenerator(fakeRouteSource{}, "")
 
-	// PHP falsy values ("", "0"): the URL never expires.
+	// Empty and "0" expiry values mean the URL never expires.
 	assert.True(t, ug.SignatureHasNotExpired(req("")))
 	assert.True(t, ug.SignatureHasNotExpired(req("expires=")))
 	assert.True(t, ug.SignatureHasNotExpired(req("expires=0")))
 
-	// "0.0" is TRUTHY in PHP and compares numerically as 0, so
-	// now > 0.0 holds and the URL counts as expired.
+	// "0.0" compares numerically as 0, so now > 0.0 holds and the URL counts
+	// as expired.
 	assert.False(t, ug.SignatureHasNotExpired(req("expires=0.0")))
 
-	// A non-numeric value compares as 0 in PHP 8: expired.
+	// A non-numeric value compares as 0: expired.
 	assert.False(t, ug.SignatureHasNotExpired(req("expires=abc")))
 
 	// Numeric comparisons for real timestamps.
@@ -533,14 +533,13 @@ func TestJoinSignedPayloadRtrimSemantics(t *testing.T) {
 
 	// Relative form: '/'+request path, which trims slashes.
 	assert.Equal(t, "/foo", joinSignedPayload("", "/foo/", ""))
-	// the reference implementation quirk: path() returns "/" for an empty path, so the relative
-	// form is '/'.'/' = '//'.
+	// An empty path is treated as "/", so the relative form is '/'.'/' = '//'.
 	assert.Equal(t, "//", joinSignedPayload("", "/", ""))
 }
 
 func TestHasValidSignatureTrailingSlashRequestPath(t *testing.T) {
-	// the reference implementation rtrims the absolute URL, so the same signed URL
-	// requested with a trailing path slash still verifies.
+	// The absolute URL is right-trimmed, so the same signed URL requested with
+	// a trailing path slash still verifies.
 	r := New(nil, nil)
 	r.Get("/download/{file}", func(file string) string { return "x" }).Name("file.download")
 	r.Register()
@@ -611,9 +610,9 @@ func TestAddRequestPortUsesRequestScheme(t *testing.T) {
 }
 
 func TestUrlGeneratorEmptyParamWithDefaultStaysInQuery(t *testing.T) {
-	// the reference implementation replaceNamedParameters: the default branch does
-	// NOT consume the parameter (no), so an explicitly supplied
-	// EMPTY parameter survives and lands in the query string as "id=".
+	// The default branch does NOT consume the parameter, so an explicitly
+	// supplied EMPTY parameter survives and lands in the query string as
+	// "id=".
 	r := New(nil, nil)
 	r.Get("/users/{id?}", func() string { return "ok" }).Name("users.show")
 	r.Register()

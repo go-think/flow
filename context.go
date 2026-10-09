@@ -50,6 +50,8 @@ type Request struct {
 	keysMu            sync.RWMutex
 	parseOnce         sync.Once
 	canonical         *Response
+	trustedProxies    []string
+	requestID         string
 }
 
 // CanonicalResponse returns the lazily-created response bound to this
@@ -221,8 +223,7 @@ func (r *Request) IsMethod(m string) bool {
 	return strings.ToUpper(m) == r.GetMethod()
 }
 
-// SetRoute stores the matched route on the request
-// ).
+// SetRoute stores the matched route on the request.
 func (r *Request) SetRoute(route *Route) { r.currentRoute = route }
 
 // Route returns the route matched for this request, if any.
@@ -235,8 +236,7 @@ func (r *Request) SetRouteParam(name, value string) {
 	r.routeParams[name] = value
 }
 
-// ForgetRouteParam removes a route parameter by name
-// .
+// ForgetRouteParam removes a route parameter by name.
 func (r *Request) ForgetRouteParam(name string) {
 	r.routeParamsMu.Lock()
 	defer r.routeParamsMu.Unlock()
@@ -259,8 +259,7 @@ func (r *Request) RouteParams() map[string]string {
 	return r.routeParamsSnapshot()
 }
 
-// SetOriginalParams records the bind-time snapshot of the route parameters
-// .
+// SetOriginalParams records the bind-time snapshot of the route parameters.
 func (r *Request) SetOriginalParams(params []*parameter) {
 	r.routeParamsMu.Lock()
 	defer r.routeParamsMu.Unlock()
@@ -296,8 +295,7 @@ func (r *Request) GetOriginalRouteParam(key string, defaultValue ...string) stri
 	return ""
 }
 
-// SetRouteParamObject stores an object resolved for a route parameter
-// .
+// SetRouteParamObject stores an object resolved for a route parameter.
 func (r *Request) SetRouteParamObject(name string, value any) {
 	r.routeParamsMu.Lock()
 	defer r.routeParamsMu.Unlock()
@@ -756,24 +754,39 @@ func (r *Request) BearerToken() string {
 	return ""
 }
 
-// ClientIP returns the client IP.
+// ClientIP returns the client IP. Forwarded headers (X-Real-Ip,
+// X-Forwarded-For) are honored when no trusted proxies are configured
+// (backward-compatible legacy behavior) or when the request arrives through a
+// configured trusted proxy; otherwise the socket address is authoritative.
+// With trusted proxies configured the X-Forwarded-For chain is walked
+// right-to-left and the rightmost untrusted hop wins.
 func (r *Request) ClientIP() string {
 	if r.Request == nil {
 		return ""
 	}
-	if ip := r.Header("X-Real-Ip"); ip != "" {
+	if !r.forwardedHeadersAllowed() {
+		return remoteAddrHost(r.Request.RemoteAddr)
+	}
+	if ip := normalizeForwardedIP(r.Header("X-Real-Ip")); ip != "" {
 		return ip
 	}
-	if ip := r.Header("X-Forwarded-For"); ip != "" {
-		return strings.Split(ip, ",")[0]
+	if xff := r.Header("X-Forwarded-For"); xff != "" {
+		entries := parseForwardedList(xff)
+		if len(entries) == 0 {
+			return remoteAddrHost(r.Request.RemoteAddr)
+		}
+		if r.trustedProxyConfigured() {
+			for i := len(entries) - 1; i >= 0; i-- {
+				if !r.isTrustedProxyIP(entries[i]) {
+					return entries[i]
+				}
+			}
+			return entries[0]
+		}
+		return entries[0]
 	}
 
-	// RemoteAddr could be IP:port
-	addr := r.Request.RemoteAddr
-	if idx := strings.LastIndex(addr, ":"); idx != -1 {
-		return addr[:idx]
-	}
-	return addr
+	return remoteAddrHost(r.Request.RemoteAddr)
 }
 
 // WantsJson returns true if the request asks for a JSON response.
@@ -1011,15 +1024,24 @@ func (r *Request) Ip() string {
 	return r.ClientIP()
 }
 
-// Host returns the request host (e.g. "example.com:8080").
+// Host returns the request host (e.g. "example.com:8080"). The
+// X-Forwarded-Host header is honored only when forwarded headers are allowed
+// (see forwardedHeadersAllowed).
 func (r *Request) Host() string {
 	if r.Request == nil {
 		return ""
 	}
+	if r.forwardedHeadersAllowed() {
+		if fh := r.Request.Header.Get("X-Forwarded-Host"); fh != "" {
+			return fh
+		}
+	}
 	return r.Request.Host
 }
 
-// Scheme returns the request scheme ("https" or "http").
+// Scheme returns the request scheme ("https" or "http"). Forwarded proto
+// headers are honored only when forwarded headers are allowed (see
+// forwardedHeadersAllowed).
 func (r *Request) Scheme() string {
 	if r.Request == nil {
 		return "http"
@@ -1027,11 +1049,13 @@ func (r *Request) Scheme() string {
 	if r.Request.TLS != nil {
 		return "https"
 	}
-	if proto := r.Request.Header.Get("X-Forwarded-Proto"); proto != "" {
-		return proto
-	}
-	if ssl := r.Request.Header.Get("X-Forwarded-Ssl"); ssl == "on" {
-		return "https"
+	if r.forwardedHeadersAllowed() {
+		if proto := r.Request.Header.Get("X-Forwarded-Proto"); proto != "" {
+			return proto
+		}
+		if ssl := r.Request.Header.Get("X-Forwarded-Ssl"); ssl == "on" {
+			return "https"
+		}
 	}
 	return "http"
 }
@@ -1416,19 +1440,15 @@ func DownloadResponse(filePath string, filename ...string) *Response {
 }
 
 // DownloadWithDisposition creates a file download response with an explicit
-// Content-Disposition type ("attachment" or "inline"), applying the reference implementation
-// fallbackName semantics (the reference implementation: —
-// the disposition helpers).
+// Content-Disposition type ("attachment" or "inline").
 func DownloadWithDisposition(filePath string, filename string, disposition string) *Response {
 	r := DownloadResponse(filePath, filename)
 	r.Header("Content-Disposition", contentDispositionValue(disposition, filename))
 	return r
 }
 
-// contentDispositionValue builds a Content-Disposition header value with the
-// conventional fallback-name semantics: percent signs are dropped when the
-// filename is not printable ASCII (transliteration has no Go equivalent
-// here).
+// contentDispositionValue builds a Content-Disposition header value. Percent
+// signs are dropped when the filename is not printable ASCII.
 func contentDispositionValue(disposition, filename string) string {
 	if disposition != "inline" {
 		disposition = "attachment"
@@ -1473,9 +1493,8 @@ func (r *Response) SetStream(streamFunc func(w io.Writer) bool) *Response {
 	return r
 }
 
-// StreamResponse creates a new streaming HTTP Response (the reference implementation: stream,
-// — X-Accel-Buffering is disabled so nginx does
-// not buffer the stream).
+// StreamResponse creates a new streaming HTTP Response. X-Accel-Buffering is
+// disabled so nginx does not buffer the stream.
 func StreamResponse(streamFunc func(w io.Writer) bool) *Response {
 	r := NewResponse()
 	r.SetContentType("text/event-stream")
@@ -1527,8 +1546,7 @@ func StreamDownload(streamFunc func(w io.Writer) bool, filename string, args ...
 }
 
 // NoContent creates a new 204 No Content Response. Headers can be attached
-// fluently with Response.Header (the minimal-invasive equivalent of the reference implementation
-// headers argument: NoContent().Header("X-Foo", "bar")).
+// fluently with Response.Header, e.g. NoContent().Header("X-Foo", "bar").
 func NoContent(status ...int) *Response {
 	code := http.StatusNoContent
 	if len(status) > 0 {
@@ -1537,10 +1555,8 @@ func NoContent(status ...int) *Response {
 	return NewResponse().SetCode(code).SetContent("")
 }
 
-// Json Create a new HTTP Response with JSON data. A value that cannot be
-// encoded panics carrying the original error — the reference jsonResponse
-// constructor throws InvalidArgumentException on JSON encoding failures, and
-// an empty body must not be sent instead.
+// Json creates a new HTTP Response with JSON data. A value that cannot be
+// encoded panics carrying the original error, so an empty body is never sent.
 func Json(v interface{}) *Response {
 	c, err := json.Marshal(v)
 	if err != nil {
@@ -1564,12 +1580,9 @@ func Download(filePath string, filename ...string) *Response {
 	return DownloadResponse(filePath, filename...)
 }
 
-// MakeResponse Create a new HTTP Response by auto detecting content type
-// Jsonp creates a JSONP response with the given callback name. The
-// Content-Type is text/javascript, matching the conventional callback
-// response semantics. A value that cannot be encoded panics carrying the
-// original error, exactly like Json — the JSON constructor throws
-// InvalidArgumentException on JSON encoding failures.
+// Jsonp creates a JSONP response with the given callback name. The Content-Type
+// is text/javascript. A value that cannot be encoded panics carrying the
+// original error, exactly like Json.
 func Jsonp(callback string, v interface{}) *Response {
 	body, err := json.Marshal(v)
 	if err != nil {
@@ -1604,9 +1617,9 @@ func StreamJson(data []any, status ...int) *Response {
 }
 
 // EventStream creates a server-sent events response; the callback writes one
-// event per invocation and returns false to end the stream (the reference implementation:
-// eventStream, — Cache-Control: no-cache plus
-// X-Accel-Buffering: no so nginx does not buffer the stream).
+// event per invocation and returns false to end the stream. Cache-Control:
+// no-cache and X-Accel-Buffering: no are set so nginx does not buffer the
+// stream.
 func EventStream(write func(w io.Writer) bool) *Response {
 	r := NewResponse().SetContentType("text/event-stream")
 	r.Header("Cache-Control", "no-cache")

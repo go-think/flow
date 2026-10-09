@@ -28,8 +28,7 @@ type ScopedRoutable interface {
 }
 
 // ScopedSoftDeletableRoutable is the soft-delete aware variant of scoped
-// binding, used when the route allows trashed bindings
-// .
+// binding, used when the route allows trashed bindings.
 type ScopedSoftDeletableRoutable interface {
 	ResolveSoftDeletableChildRouteBinding(ctx context.Context, childType string, value string, field string) (any, error)
 }
@@ -126,10 +125,9 @@ func implicitBindingArgument(targetType reflect.Type, paramName, paramValue, fie
 		return reflect.Value{}, nil
 	}
 
-	// 1. Scoped child resolution through the parent model. Like the reference implementation, it
-	// only runs when the route enforces scoping or declares a binding field
-	// for this parameter, and the route does not prevent scoping
-	// ().
+	// 1. Scoped child resolution through the parent model. It only runs when the
+	// route enforces scoping or declares a binding field for this parameter, and
+	// the route does not prevent scoping.
 	if parent != nil && route != nil && !route.PreventsScopedBindings() &&
 		(route.EnforcesScopedBindings() || route.hasBindingField(paramName)) {
 		if scopedParent, ok := parent.(ScopedRoutable); ok {
@@ -194,8 +192,7 @@ func resolveScopedParent(parent ScopedRoutable, route *Route, ctx context.Contex
 	return parent.ResolveChildRouteBinding(ctx, paramName, paramValue, field)
 }
 
-// hasBindingField reports whether the parameter declares a binding field
-// )).
+// hasBindingField reports whether the parameter declares a binding field.
 func (r *Route) hasBindingField(name string) bool {
 	_, ok := r.bindingFields[name]
 	return ok

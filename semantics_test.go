@@ -8,15 +8,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// The tests in this file lock the reference-aligned semantics:
-// registration-order matching, fallback-last, trailing slash normalization,
-// name concatenation, automatic HEAD, Allow ordering and the can middleware
-// chain.
+// The tests in this file cover router semantics: registration-order matching,
+// fallback-last, trailing slash normalization, name concatenation, automatic
+// HEAD, Allow ordering and the can middleware chain.
 
 func TestSemantics_RegistrationOrderPriority(t *testing.T) {
-	// the reference implementation matches routes in registration order: a dynamic route declared
-	// first beats a static route declared later (no static-over-dynamic
-	// priority).
+	// Routes match in registration order: a dynamic route declared first beats
+	// a static route declared later (no static-over-dynamic priority).
 	r := NewRouter(nil, nil)
 	r.Get("/users/{id}", func(ctx Context, id string) Response {
 		return ctx.String(200, "dynamic:"+id)
@@ -31,7 +29,7 @@ func TestSemantics_RegistrationOrderPriority(t *testing.T) {
 }
 
 func TestSemantics_TrailingSlash(t *testing.T) {
-	// the reference uriValidator trims the trailing slash of the request path.
+	// The trailing slash of the request path is trimmed before matching.
 	r := NewRouter(nil, nil)
 	r.Get("/users", func(ctx Context) Response { return ctx.String(200, "users") })
 
@@ -86,7 +84,7 @@ func TestSemantics_HeadAutoAppend(t *testing.T) {
 		return ctx.String(200, "ok")
 	})
 	_ = route
-	// the reference route constructor appends HEAD to GET routes.
+	// A GET route automatically also handles HEAD.
 	var found *Route
 	for _, rt := range r.GetRoutes() {
 		found = rt
@@ -108,7 +106,7 @@ func TestSemantics_405VerbsOrderAndMessage(t *testing.T) {
 
 	resp := r.Dispatch(httptest.NewRequest(http.MethodGet, "/users", nil))
 	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode())
-	// the reference implementation builds the Allow list in Router verb order (GET, HEAD, POST,...).
+	// The Allow list follows the router's verb order (GET, HEAD, POST, ...).
 	assert.Equal(t, "POST, DELETE", resp.Headers().Get("Allow"))
 	assert.Contains(t, resp.Body(), "The GET method is not supported for route users. Supported methods: POST, DELETE.")
 }
@@ -121,7 +119,7 @@ func TestSemantics_404Message(t *testing.T) {
 }
 
 func TestSemantics_WhereUlidLowercase(t *testing.T) {
-	// the reference whereUlid accepts both cases; lowercase ULIDs must match.
+	// WhereUlid accepts both cases; lowercase ULIDs must match.
 	r := NewRouter(nil, nil)
 	r.Get("/ulid/{id}", func(ctx Context, id string) Response {
 		return ctx.String(200, "ulid:"+id)
@@ -134,7 +132,7 @@ func TestSemantics_WhereUlidLowercase(t *testing.T) {
 
 func TestSemantics_PushMiddlewareToGroupCreatesGroup(t *testing.T) {
 	r := NewRouter(nil, nil)
-	// the reference implementation creates the group when it does not exist and skips duplicates.
+	// The group is created when it does not exist, and duplicates are skipped.
 	r.PushMiddlewareToGroup("web", "auth")
 	r.PushMiddlewareToGroup("web", "auth")
 	r.PushMiddlewareToGroup("web", "sessions")
@@ -148,7 +146,7 @@ func TestSemantics_DuplicateRegistrationReplaces(t *testing.T) {
 	r.Get("/users", func(ctx Context) Response { return ctx.String(200, "first") })
 	r.Get("/users", func(ctx Context) Response { return ctx.String(200, "second") })
 
-	// the reference implementation keys routes by methods+domain+uri: the later registration wins
+	// Routes are keyed by methods+domain+uri: the later registration wins
 	// everywhere (matching and listing).
 	assert.Equal(t, 1, r.Routes().Count())
 	resp := r.Dispatch(httptest.NewRequest(http.MethodGet, "/users", nil))
@@ -180,7 +178,7 @@ func TestSemantics_CanMiddlewareDeniesByDefault(t *testing.T) {
 	r := NewRouter(nil, nil)
 	r.Get("/admin", func(ctx Context) Response { return ctx.String(200, "secret") }).Can("viewAdmin")
 
-	// the reference can middleware denies abilities the gate does not grant.
+	// The can middleware denies abilities the gate does not grant.
 	resp := r.Dispatch(httptest.NewRequest(http.MethodGet, "/admin", nil))
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode())
 	assert.Equal(t, "This action is unauthorized.", resp.Body())

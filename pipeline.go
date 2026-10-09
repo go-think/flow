@@ -38,22 +38,22 @@ func (p *Pipeline) WithExceptionHandler(handler ExceptionHandler) *Pipeline {
 	return p
 }
 
-// Send sets the object being sent through the pipeline. Like the reference implementation
-// send() it mutates the pipeline in place and returns itself.
+// Send sets the object being sent through the pipeline, mutating the pipeline in
+// place and returning itself.
 func (p *Pipeline) Send(req *Request) *Pipeline {
 	p.passable = req
 	return p
 }
 
-// Pipe Push a Middleware Handler to the pipeline, appending to the existing
-// ones).
+// Pipe pushes a Middleware Handler to the pipeline, appending to the existing
+// ones.
 func (p *Pipeline) Pipe(m Handler) *Pipeline {
 	p.handlers = append(p.handlers, m)
 	return p
 }
 
 // Through sets the Middleware Handlers of the pipeline, replacing any pipes
-// configured previously).
+// configured previously.
 func (p *Pipeline) Through(hls []Handler) *Pipeline {
 	p.handlers = hls
 	return p

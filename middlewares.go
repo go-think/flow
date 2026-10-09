@@ -263,14 +263,12 @@ func (h *TrimStringsMiddleware) isExcepted(key string) bool {
 // --- End trim.go ---
 
 // --- Begin validate_signature.go ---
-// signatureNeverValidate holds the globally ignored parameter names
-// , merged into every
-// validation at process time.
+// signatureNeverValidate holds the globally ignored parameter names, merged
+// into every validation at process time.
 var signatureNeverValidate []string
 
-// ValidateSignatureMiddleware validates signed URLs
-// . Validation is absolute unless the
-// middleware was built for relative URLs.
+// ValidateSignatureMiddleware validates signed URLs. Validation is absolute
+// unless the middleware was built for relative URLs.
 type ValidateSignatureMiddleware struct {
 	generator *UrlGenerator
 	relative  bool
@@ -279,14 +277,13 @@ type ValidateSignatureMiddleware struct {
 
 // NewValidateSignatureMiddleware creates a new URL signature validation
 // middleware backed by the given UrlGenerator (which owns the key resolver).
-// Validation is absolute, the the reference implementation default.
+// Validation is absolute.
 func NewValidateSignatureMiddleware(ug *UrlGenerator) Handler {
 	return &ValidateSignatureMiddleware{generator: ug}
 }
 
 // ValidateSignatureAbsolute returns signature middleware validating the
-// absolute URL while ignoring the given parameters
-// .
+// absolute URL while ignoring the given parameters.
 func ValidateSignatureAbsolute(ug *UrlGenerator, ignore ...string) Middleware {
 	return (&ValidateSignatureMiddleware{generator: ug, ignore: ignore}).process
 }
@@ -298,9 +295,9 @@ func ValidateSignatureRelative(ug *UrlGenerator, ignore ...string) Middleware {
 }
 
 // ValidateSignatureExcept registers parameters that signature validation
-// ignores globally (the reference implementation: — the package-level
-// "never validate" table, merged by every validator at process time) and
-// returns default absolute validation middleware for convenience.
+// ignores globally (the package-level "never validate" table, merged by every
+// validator at process time) and returns default absolute validation middleware
+// for convenience.
 func ValidateSignatureExcept(ug *UrlGenerator, params ...string) Middleware {
 	signatureNeverValidate = appendMissing(signatureNeverValidate, params...)
 	return (&ValidateSignatureMiddleware{generator: ug}).process
@@ -320,14 +317,12 @@ func (h *ValidateSignatureMiddleware) Process(req *Request, next Closure) interf
 }
 
 // process runs the actual validation: absolute by default, relative when the
-// middleware was built with ValidateSignatureRelative
-// ).
-// A failed validation throws InvalidSignatureException, which renders as a 403
-// "Invalid signature." response — here the InvalidSignatureError is built and
-// rendered through its Render method.
+// middleware was built with ValidateSignatureRelative. A failed validation
+// returns the 403 "Invalid signature." response rendered by
+// InvalidSignatureError.
 func (h *ValidateSignatureMiddleware) process(req *Request, next Closure) interface{} {
 	if !h.isValid(req) {
-		// throw new InvalidSignatureException → 403 "Invalid signature.".
+		// Render the 403 "Invalid signature." response.
 		return (&InvalidSignatureError{}).Render()
 	}
 
@@ -348,8 +343,7 @@ func (h *ValidateSignatureMiddleware) isValid(req *Request) bool {
 	return h.generator.HasValidSignatureWhileIgnoring(req, ignore...)
 }
 
-// mergedIgnore merges the instance ignore list with the global except table
-// .
+// mergedIgnore merges the instance ignore list with the global except table.
 func (h *ValidateSignatureMiddleware) mergedIgnore() []string {
 	ignore := make([]string, 0, len(h.ignore)+len(signatureNeverValidate))
 	ignore = append(ignore, h.ignore...)
@@ -357,8 +351,7 @@ func (h *ValidateSignatureMiddleware) mergedIgnore() []string {
 	return ignore
 }
 
-// appendMissing appends values not yet present, keeping the table unique
-// ))).
+// appendMissing appends values not yet present, keeping the table unique.
 func appendMissing(values []string, additions ...string) []string {
 	for _, addition := range additions {
 		found := false
@@ -390,14 +383,12 @@ func NewSubstituteBindingsMiddleware(r Router) Handler {
 }
 
 // Process implements Handler. A failed explicit binding surfaces as
-// *ModelNotFoundError. Like the reference implementation
-// L41-50, the middleware catches it: when the route
-// has a missing callback () the callback runs and its result
-// becomes the response (the next handler is never called); otherwise the error is
-// re-panicked for the router to convert into the route's missing response or a
-// 404.
+// *ModelNotFoundError, which the middleware catches: when the route has a
+// missing callback the callback runs and its result becomes the response (the
+// next handler is never called); otherwise the error is re-panicked for the
+// router to convert into the route's missing response or a 404.
 func (h *SubstituteBindingsMiddleware) Process(req *Request, next Closure) interface{} {
-	// the reference implementation resolves the route from the request.
+	// Resolve the route from the request.
 	route := req.Route()
 	if route == nil && h.Router != nil {
 		route = h.Router.CurrentRoute()
@@ -418,8 +409,7 @@ func (h *SubstituteBindingsMiddleware) Process(req *Request, next Closure) inter
 
 // substituteBindings runs the explicit and implicit binding substitution,
 // converting a *ModelNotFoundError panic into an error while letting any other
-// panic propagate (the reference implementation: the try/catch around substituteBindings +
-// substituteImplicitBindings).
+// panic propagate.
 func (h *SubstituteBindingsMiddleware) substituteBindings(route *Route, req *Request, params []*parameter) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {

@@ -19,30 +19,26 @@ func NewMiddlewareNameResolver(aliases map[string]any, groups map[string][]any) 
 }
 
 // Resolve expands a middleware entry (alias, group name, or "alias:params")
-// into its concrete list. The lookup order mirrors the reference implementation
-// (): first the FULL name is checked against
-// the alias map — the hit is honored only when the mapped value is a Closure,
-// which is returned as-is; only then is an exact group name expanded
-// recursively with self-reference detection;
-// finally the name is split on the first ":" and the alias head is resolved
-// with the ":params" suffix re-appended. Unknown names pass through unchanged
-// like the reference resolve(), which returns
-// "unknown-name pass-through with its parameters" behavior and lets the pipeline surface the
-// problem.
+// into its concrete list. First the full name is checked against the alias map
+// and honored only when the mapped value is a Closure; then an exact group name
+// is expanded recursively with self-reference detection; finally the name is
+// split on the first ":" and the alias head resolved with the ":params" suffix
+// re-appended. Unknown names pass through unchanged so the pipeline can surface
+// the problem.
 func (r *MiddlewareNameResolver) Resolve(name string) ([]any, error) {
-	// the reference implementation L24-26: a full-string map hit wins before the group lookup, but
-	// only when the mapped value is a Closure (string aliases with parameters
-	// are resolved through the split below, like the reference implementation).
+	// A full-string alias hit wins before the group lookup, but only when the
+	// mapped value is a Closure; string aliases with parameters are resolved
+	// through the split below.
 	if alias, ok := r.aliases[name]; ok && isClosureValue(alias) {
 		return []any{alias}, nil
 	}
-	// the reference implementation L29-32: group expansion by exact name — "web:foo" is not a
-	// group name and never expands group "web".
+	// Group expansion is by exact name: "web:foo" is not
+	// a group name and never expands group "web".
 	if _, isGroup := r.groups[name]; isGroup {
 		return r.resolveEntries(name, nil)
 	}
-	// Alias resolution with:params suffix preservation. A Closure alias is
-	// returned as-is without parameter concatenation, like the reference implementation.
+	// Alias resolution preserving the ":params" suffix. A Closure alias is
+	// returned as-is without parameter concatenation.
 	aliasName, aliasParams := splitAliasParams(name)
 	if alias, ok := r.aliases[aliasName]; ok {
 		if aliasParams != "" {
@@ -55,7 +51,7 @@ func (r *MiddlewareNameResolver) Resolve(name string) ([]any, error) {
 		}
 		return []any{alias}, nil
 	}
-	// the reference implementation passes unknown middleware through with its parameters.
+	// Unknown middleware passes through with its parameters.
 	if aliasParams != "" {
 		return []any{fmt.Sprintf("%s:%s", aliasName, aliasParams)}, nil
 	}
@@ -70,8 +66,7 @@ func splitAliasParams(name string) (string, string) {
 	return name, ""
 }
 
-// isClosureValue reports whether the middleware entry is a closure/func value
-// .
+// isClosureValue reports whether the middleware entry is a closure/func value.
 func isClosureValue(v any) bool {
 	return v != nil && reflect.ValueOf(v).Kind() == reflect.Func
 }
@@ -92,9 +87,8 @@ func (r *MiddlewareNameResolver) resolveEntries(name string, seen []string) ([]a
 	var out []any
 	for _, entry := range entries {
 		if entryName, isStr := entry.(string); isStr {
-			// the reference implementation checks group membership with the FULL entry string
-			// (a full-string group lookup), so "web:foo" does not expand
-			// group "web" ().
+			// Group membership uses the full entry string, so "web:foo" does not
+			// expand group "web".
 			for _, s := range seen {
 				if s == entryName {
 					return nil, fmt.Errorf("flow: [%s] middleware group is referencing itself", entryName)
@@ -109,8 +103,7 @@ func (r *MiddlewareNameResolver) resolveEntries(name string, seen []string) ([]a
 				continue
 			}
 			// A group member that is an alias is replaced by its target with
-			// the ":params" suffix re-appended (the reference implementation: parseMiddlewareGroup
-			// lines 78-88).
+			// the ":params" suffix re-appended.
 			head, params := splitAliasParams(entryName)
 			if alias, ok := r.aliases[head]; ok {
 				if params != "" {

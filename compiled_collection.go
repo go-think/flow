@@ -5,11 +5,9 @@ import (
 	"sync"
 )
 
-// RouteCollectionInterface is the internal contract the router needs from a
-// route store, mirroring the reference routeCollectionInterface plus the
-// Countable::count method. Both RouteCollection (live routes) and
-// CompiledRouteCollection (routes restored from the route cache plus
-// dynamically added ones) satisfy it.
+// RouteCollectionInterface is the contract the router needs from a route store.
+// Both RouteCollection (live routes) and CompiledRouteCollection (cached plus
+// dynamically added routes) satisfy it.
 type RouteCollectionInterface interface {
 	// Add adds a Route instance to the collection.
 	Add(route *Route) *Route
@@ -18,7 +16,7 @@ type RouteCollectionInterface interface {
 	// RefreshActionLookups refreshes the action look-up table.
 	RefreshActionLookups()
 	// Match finds the first route matching a given request; the bound
-	// parameters are mirrored onto the request.
+	// parameters are copied onto the request.
 	Match(request *Request) (*Route, error)
 	// Get gets routes from the collection by method.
 	Get(method ...string) []*Route
@@ -41,21 +39,13 @@ type RouteCollectionInterface interface {
 var _ RouteCollectionInterface = (*RouteCollection)(nil)
 var _ RouteCollectionInterface = (*CompiledRouteCollection)(nil)
 
-// CompiledRouteCollection mirrors the reference compiledRouteCollection: routes
-// restored from the route cache are held apart from the routes registered
-// AFTER the restore (the dynamic sub-collection), with the reference precedence
-// rules:
-
-// - matching consults the cached routes first, with the request path's
-// trailing slashes trimmed (requestWithoutTrailingSlash — only cached
-// matching trims);
-//   - a cached miss or verb mismatch delegates to the dynamic routes;
-//   - a cached FALLBACK match defers to a dynamic non-fallback match;
-//   - dynamic routes take precedence over cached routes with the same
-//     domain+uri;
-//   - name lookups consult a lazy cache over the cached routes, then the
-//
-// dynamic routes.
+// CompiledRouteCollection holds routes restored from the route cache apart from
+// those registered after the restore (the dynamic sub-collection). Matching
+// consults cached routes first, with the request path's trailing slashes
+// trimmed; a cached miss or verb mismatch delegates to the dynamic routes, and
+// a cached fallback match defers to a dynamic non-fallback match. Dynamic
+// routes take precedence over cached routes with the same domain+uri, and name
+// lookups consult a lazy cache over the cached routes before the dynamic ones.
 type CompiledRouteCollection struct {
 	mu        sync.RWMutex
 	cached    []*Route
@@ -63,8 +53,8 @@ type CompiledRouteCollection struct {
 	nameCache map[string]*Route
 }
 
-// NewCompiledRouteCollection wraps the routes reconstructed from the route
-// cache).
+// NewCompiledRouteCollection creates a collection from routes reconstructed from
+// the route cache.
 func NewCompiledRouteCollection(cached []*Route) *CompiledRouteCollection {
 	return &CompiledRouteCollection{
 		cached:    append([]*Route(nil), cached...),
@@ -73,22 +63,20 @@ func NewCompiledRouteCollection(cached []*Route) *CompiledRouteCollection {
 	}
 }
 
-// Add registers a post-restore route into the dynamic sub-collection
-// (name/action lookups refresh lazily).
+// Add registers a post-restore route in the dynamic sub-collection.
 func (c *CompiledRouteCollection) Add(route *Route) *Route {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.dynamic.Add(route)
 }
 
-// Match finds the first route matching the request, cached routes first
-// .
+// Match finds the first route matching the request, consulting cached routes
+// first.
 func (c *CompiledRouteCollection) Match(request *Request) (*Route, error) {
 	route := c.matchCached(request)
 	if route == nil {
-		// ResourceNotFoundException|MethodNotAllowedException from
-		// the compiled matcher delegates to the dynamic routes; a dynamic
-		// 404 surfaces as the final not-found error.
+		// A cached miss or verb mismatch delegates to the dynamic routes; a
+		// dynamic 404 surfaces as the final not-found error.
 		return c.dynamic.Match(request)
 	}
 	if route.IsFallback() {
@@ -101,10 +89,8 @@ func (c *CompiledRouteCollection) Match(request *Request) (*Route, error) {
 	return route, nil
 }
 
-// matchCached matches the cached routes with the trailing slashes trimmed off
-// the request path.
-// A verb mismatch among cached routes defers to the dynamic routes, like the
-// MethodNotAllowedException branch.
+// matchCached matches the cached routes against the request path with trailing
+// slashes trimmed. It returns nil on a miss, deferring to the dynamic routes.
 func (c *CompiledRouteCollection) matchCached(request *Request) *Route {
 	c.mu.RLock()
 	cached := c.cached
@@ -114,9 +100,8 @@ func (c *CompiledRouteCollection) matchCached(request *Request) *Route {
 	if trimmed == "" {
 		trimmed = "/"
 	}
-	// Rebuild a lightweight copy of the request (never copy the struct: it
-	// embeds a mutex) carrying the trailing-slash-trimmed path — the reference implementation
-	// requestWithoutTrailingSlash duplicates the request.
+	// Build a lightweight copy of the request (never copy the struct: it
+	// embeds a mutex) carrying the trailing-slash-trimmed path.
 	dup := NewRequest(request.Request)
 	dup.method = request.method
 	dup.path = trimmed
@@ -127,11 +112,8 @@ func (c *CompiledRouteCollection) matchCached(request *Request) *Route {
 	if route == nil {
 		return nil
 	}
-	// The reference passes the trimmed duplicate forward and binds it; flow
-	// keeps the original request flowing, so the parameters bound against
-	// the trimmed path are mirrored back onto it (the mirror is what
-	// Run/middlewares read — without this, cached routes would dispatch with
-	// empty parameters).
+	// Bind against the trimmed copy, then copy the bound parameters back onto the
+	// original request, which is what Run and middleware read.
 	params := route.Bind(dup)
 	for _, p := range params {
 		request.SetRouteParam(p.name, p.value)
@@ -140,8 +122,8 @@ func (c *CompiledRouteCollection) matchCached(request *Request) *Route {
 	return route
 }
 
-// Get returns the routes for a verb with dynamic routes taking precedence
-// over cached routes with the same domain+uri (merged lookups).
+// Get returns the routes for the given verb, with dynamic routes taking
+// precedence over cached routes with the same domain+uri.
 func (c *CompiledRouteCollection) Get(method ...string) []*Route {
 	if len(method) == 0 {
 		return c.GetRoutes()
@@ -166,8 +148,7 @@ func (c *CompiledRouteCollection) Get(method ...string) []*Route {
 	return out
 }
 
-// GetRoutes returns the cached routes followed by the dynamic additions
-// .
+// GetRoutes returns the cached routes followed by the dynamic additions.
 func (c *CompiledRouteCollection) GetRoutes() []*Route {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -200,8 +181,7 @@ func (c *CompiledRouteCollection) GetRoutes() []*Route {
 	return out
 }
 
-// GetRoutesByMethod groups the routes by verb
-// .
+// GetRoutesByMethod groups the routes by verb.
 func (c *CompiledRouteCollection) GetRoutesByMethod() map[string][]*Route {
 	out := make(map[string][]*Route)
 	for _, route := range c.GetRoutes() {
@@ -242,8 +222,7 @@ func (c *CompiledRouteCollection) GetByName(name string) *Route {
 	return c.dynamic.GetByName(name)
 }
 
-// GetByAction resolves a route by its controller action string
-// .
+// GetByAction resolves a route by its controller action string.
 func (c *CompiledRouteCollection) GetByAction(action string) *Route {
 	for _, route := range c.GetRoutes() {
 		if route.ActionName() == action {
@@ -253,25 +232,19 @@ func (c *CompiledRouteCollection) GetByAction(action string) *Route {
 	return nil
 }
 
-// HasNamedRoute reports whether a route with the name exists
-// || attributes[name] ||
-// routes->hasNamedRoute).
+// HasNamedRoute reports whether a route with the given name exists.
 func (c *CompiledRouteCollection) HasNamedRoute(name string) bool {
 	return c.GetByName(name) != nil
 }
 
-// RefreshNameLookups refreshes the name look-up table of the DYNAMIC
-// sub-collection. The reference compiledRouteCollection makes this a no-op
-// (routes never change after the cache is written), but flow's fluent
-// registration sets names after Add, so post-restore routes need their
-// dynamic index refreshed.
+// RefreshNameLookups refreshes the name lookup table of the dynamic
+// sub-collection, whose names may be set after Add.
 func (c *CompiledRouteCollection) RefreshNameLookups() {
 	c.dynamic.RefreshNameLookups()
 }
 
-// RefreshActionLookups refreshes the action look-up table of the DYNAMIC
-// sub-collection, the same flow-specific deviation from the reference no-op
-// as RefreshNameLookups.
+// RefreshActionLookups refreshes the action lookup table of the dynamic
+// sub-collection.
 func (c *CompiledRouteCollection) RefreshActionLookups() {
 	c.dynamic.RefreshActionLookups()
 }
@@ -294,8 +267,8 @@ func cachedForMethod(cached []*Route, verb string) []*Route {
 	return out
 }
 
-// rawRequestPath returns the request path with its original (undecoded)
-// trailing form, matching what the reference implementation trims from REQUEST_URI.
+// rawRequestPath returns the request path in its original escaped form, falling
+// back to the decoded path.
 func rawRequestPath(request *Request) string {
 	if request.Request != nil && request.Request.URL != nil {
 		if escaped := request.Request.URL.EscapedPath(); escaped != "" {

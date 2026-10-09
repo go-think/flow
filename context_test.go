@@ -520,7 +520,7 @@ func TestRequestHelperMethods(t *testing.T) {
 	httpReq, _ := http.NewRequest("GET", "/test?name=john&empty=&spaces=%20%20&role=admin", nil)
 	r := NewRequest(httpReq)
 
-	// Has: key 存在即为 true（包括空字符串与纯空格）
+	// Has: true when the key exists (including empty and whitespace-only values).
 	assert.True(t, r.Has("name"))
 	assert.True(t, r.Has("empty"))
 	assert.True(t, r.Has("spaces"))
@@ -529,17 +529,17 @@ func TestRequestHelperMethods(t *testing.T) {
 	assert.False(t, r.Has("non_exist"))
 	assert.False(t, r.Has())
 
-	// Exists: 与 Has 行为一致
+	// Exists behaves the same as Has.
 	assert.True(t, r.Exists("name", "empty"))
 	assert.False(t, r.Exists("non_exist"))
 
-	// HasAny: 任意一个存在即为 true
+	// HasAny is true when any one of the keys exists.
 	assert.True(t, r.HasAny("name", "non_exist"))
 	assert.True(t, r.HasAny("empty", "another_missing"))
 	assert.False(t, r.HasAny("foo", "bar"))
 	assert.False(t, r.HasAny())
 
-	// Filled: 存在且去空格后非空
+	// Filled: the key exists and is non-empty after trimming.
 	assert.True(t, r.Filled("name"))
 	assert.True(t, r.Filled("name", "role"))
 	assert.False(t, r.Filled("empty"))
@@ -548,7 +548,7 @@ func TestRequestHelperMethods(t *testing.T) {
 	assert.False(t, r.Filled("name", "empty"))
 	assert.False(t, r.Filled())
 
-	// Missing: 键完全不存在
+	// Missing: the key is entirely absent.
 	assert.True(t, r.Missing("foo"))
 	assert.True(t, r.Missing("foo", "bar"))
 	assert.False(t, r.Missing("name"))
@@ -558,7 +558,7 @@ func TestRequestHelperMethods(t *testing.T) {
 }
 
 func TestRedirectResponse(t *testing.T) {
-	// 默认 302 重定向
+	// Defaults to a 302 redirect.
 	resp1 := Redirect("/home")
 	assert.Equal(t, http.StatusFound, resp1.GetCode())
 	assert.Equal(t, "/home", resp1.Headers().Get("Location"))
@@ -568,7 +568,7 @@ func TestRedirectResponse(t *testing.T) {
 	assert.Equal(t, http.StatusFound, rec1.Code)
 	assert.Equal(t, "/home", rec1.Header().Get("Location"))
 
-	// 自定义 301 永久重定向
+	// A custom 301 permanent redirect.
 	resp2 := Redirect("https://example.com/v2", http.StatusMovedPermanently)
 	assert.Equal(t, http.StatusMovedPermanently, resp2.GetCode())
 	assert.Equal(t, "https://example.com/v2", resp2.Headers().Get("Location"))
@@ -582,15 +582,14 @@ func TestRedirectResponse(t *testing.T) {
 // --- Begin ResponseFactory alignment tests ---
 
 func TestJsonPanicsOnUnencodableValue(t *testing.T) {
-	// JsonResponse construction throws InvalidArgumentException on
-	// JSON encoding failures instead of sending an empty body.
+	// Json panics on JSON encoding failures instead of sending an empty body.
 	assert.PanicsWithError(t, "flow: invalid JSON response: json: unsupported type: func()", func() {
 		Json(map[string]any{"fn": func() {}})
 	})
 }
 
 func TestJsonpUsesTextJavascriptContentType(t *testing.T) {
-	// Conventional semantics.
+	// Jsonp sets Content-Type text/javascript and wraps the body in the callback.
 	res := Jsonp("cb", map[string]string{"a": "b"})
 	assert.Equal(t, "text/javascript", res.GetContentType())
 	assert.Equal(t, `cb({"a":"b"});`, res.GetContent())
@@ -630,18 +629,16 @@ func TestStreamDownloadHeadersAndDisposition(t *testing.T) {
 }
 
 func TestJsonpPanicsOnUnencodableValue(t *testing.T) {
-	// Unified with Json: the reference jsonResponse constructor throws
-	// InvalidArgumentException on JSON encoding failures instead of sending
-	// an error page.
+	// Like Json, Jsonp panics on JSON encoding failures instead of sending an
+	// error page.
 	assert.PanicsWithError(t, "flow: invalid JSON response: json: unsupported type: func()", func() {
 		Jsonp("cb", map[string]any{"fn": func() {}})
 	})
 }
 
 func TestStreamResponsesDisableAccelBuffering(t *testing.T) {
-	// the reference implementation eventStream () sends Cache-Control:
-	// no-cache plus X-Accel-Buffering: no; stream (:198-217) sends
-	// X-Accel-Buffering: no.
+	// EventStream sends Cache-Control: no-cache plus X-Accel-Buffering: no;
+	// StreamResponse sends X-Accel-Buffering: no.
 	es := EventStream(func(w io.Writer) bool { return false })
 	assert.Equal(t, "no", es.Headers().Get("X-Accel-Buffering"))
 	assert.Equal(t, "no-cache", es.Headers().Get("Cache-Control"))
@@ -651,8 +648,7 @@ func TestStreamResponsesDisableAccelBuffering(t *testing.T) {
 }
 
 func TestStreamDownloadWrapsStreamPanics(t *testing.T) {
-	// streamDownload wraps any Throwable from the callback in
-	// StreamedResponseException.
+	// StreamDownload wraps a panic from the callback in StreamedResponseError.
 	res := StreamDownload(func(w io.Writer) bool { panic(errors.New("boom")) }, "f.txt", nil)
 
 	var wrapped *StreamedResponseError
@@ -670,9 +666,8 @@ func TestDownloadWithDisposition(t *testing.T) {
 	res := DownloadWithDisposition("/tmp/report.pdf", "doc.pdf", "inline")
 	assert.Equal(t, `inline; filename="doc.pdf"`, res.Headers().Get("Content-Disposition"))
 
-	// fallbackName semantics: percent signs are stripped from the fallback
-	// used for names that are not printable ASCII
-	//)).
+	// Percent signs are stripped from the fallback name used for filenames that
+	// are not printable ASCII.
 	res2 := DownloadWithDisposition("/tmp/report.pdf", "résumé%.pdf", "attachment")
 	assert.Equal(t, `attachment; filename="résumé.pdf"`, res2.Headers().Get("Content-Disposition"))
 }

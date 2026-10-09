@@ -10,42 +10,34 @@ import (
 	"time"
 )
 
-// shouldHashThrottleKeys is the package-level default deciding whether throttle
-// keys are hashed (the reference implementation:, static, default
-// true; affects formatIdentifier and named limiter bucket keys).
+// shouldHashThrottleKeys is the package-level default for whether throttle keys
+// are hashed. It affects formatIdentifier and named limiter bucket keys.
 var shouldHashThrottleKeys = true
 
 // SetShouldHashThrottleKeys sets the default key-hashing behavior applied to
 // newly created throttle middleware.
-
-// Deprecated: Use SetRateLimiterShouldHashKeys, the name aligned with the
-// the reference implementation static property, instead.
+//
+// Deprecated: Use SetRateLimiterShouldHashKeys instead.
 func SetShouldHashThrottleKeys(should bool) {
 	shouldHashThrottleKeys = should
 }
 
-// SetRateLimiterShouldHashKeys toggles the global key-hashing behavior of the
-// throttle middleware (the reference implementation: is a static
-// property toggled via a global setter, so it applies to every
-// middleware — the package-level variable here plays that role). Individual
-// middleware may still override it with ThrottleMiddleware.ShouldHashKeys,
-// the per-instance variant kept for this port.
+// SetRateLimiterShouldHashKeys toggles the global key-hashing behavior applied
+// to newly created throttle middleware. Individual middleware may override it
+// with ThrottleMiddleware.ShouldHashKeys.
 func SetRateLimiterShouldHashKeys(should bool) {
 	shouldHashThrottleKeys = should
 }
 
 // ThrottleResponseCallback builds the response returned when a rate limit is
-// exceeded (the reference implementation: callback; it receives the request and
-// the computed rate-limit headers).
+// exceeded. It receives the request and the computed rate-limit headers.
 type ThrottleResponseCallback func(request *Request, headers map[string]string) *Response
 
 // ThrottleAfterCallback decides, after the response was produced, whether the
-// request still counts against the limit (the reference implementation: callback; it
-// receives the raw pipeline result).
+// request still counts against the limit. It receives the raw pipeline result.
 type ThrottleAfterCallback func(response any) bool
 
-// throttleLimit is a single enforced bucket (the reference implementation: the anonymous limit
-// objects iterates over).
+// throttleLimit is a single enforced rate-limit bucket.
 type throttleLimit struct {
 	key              string
 	maxAttempts      int
@@ -54,8 +46,7 @@ type throttleLimit struct {
 	responseCallback ThrottleResponseCallback
 }
 
-// ThrottleMiddleware limits request throughput per client key
-// .
+// ThrottleMiddleware limits request throughput per client key.
 type ThrottleMiddleware struct {
 	limiter        RateLimiter
 	name           string // named limiter to resolve
@@ -78,9 +69,8 @@ func NewThrottleMiddleware(limiter RateLimiter, maxAttempts int, decay time.Dura
 }
 
 // NewThrottleMiddlewareWith throttles using a string policy spec plus key
-// prefix. spec may be a plain number ("60") or a guest|user pair ("60|120" —
-// without an auth component the guest segment applies)
-// .
+// prefix. spec may be a plain number ("60") or a "guest|user" pair ("60|120");
+// without an auth component the guest segment applies.
 func NewThrottleMiddlewareWith(limiter RateLimiter, spec string, decay time.Duration, prefix string) Handler {
 	return &ThrottleMiddleware{
 		limiter:        limiter,
@@ -91,14 +81,11 @@ func NewThrottleMiddlewareWith(limiter RateLimiter, spec string, decay time.Dura
 	}
 }
 
-// NewThrottleMiddlewareNamed throttles using a named limiter bucket
-// . When the name is registered on the
-// default registry its callback decides the policy. When the name is not
-// registered the request panics with MissingRateLimiterError — like the reference implementation,
-// where a non-numeric limiter reference is re-resolved in resolveMaxAttempts
-// and always throws MissingRateLimiterException, even when an explicit
-// maxAttempts was provided alongside (, 207-211).
-// Only a numeric spec ("60", "10,1") keeps the plain path.
+// NewThrottleMiddlewareNamed throttles using a named limiter bucket. When the
+// name is registered on the default registry its callback decides the policy.
+// An unregistered, non-numeric name panics with MissingRateLimiterError, even
+// when maxAttempts was provided. A numeric spec ("60", "10,1") keeps the plain
+// path.
 func NewThrottleMiddlewareNamed(limiter RateLimiter, name string, maxAttempts int, decay time.Duration) Handler {
 	return &ThrottleMiddleware{
 		limiter:        limiter,
@@ -110,15 +97,13 @@ func NewThrottleMiddlewareNamed(limiter RateLimiter, name string, maxAttempts in
 }
 
 // NewNamedThrottleMiddleware creates a throttle middleware that resolves its
-// policy dynamically from the named rate limiter registry
-// . An unregistered name panics with
-// MissingRateLimiterError.
+// policy dynamically from the named rate limiter registry. An unregistered name
+// panics with MissingRateLimiterError.
 func NewNamedThrottleMiddleware(name string) Handler {
 	return &ThrottleMiddleware{name: name, shouldHashKeys: shouldHashThrottleKeys}
 }
 
-// ShouldHashKeys enables/disables hashing of throttle keys for this middleware
-// .
+// ShouldHashKeys enables or disables hashing of throttle keys for this middleware.
 func (h *ThrottleMiddleware) ShouldHashKeys(should bool) *ThrottleMiddleware {
 	h.shouldHashKeys = should
 	return h
@@ -147,12 +132,10 @@ func (h *ThrottleMiddleware) Process(req *Request, next Closure) any {
 		if limiterFn, found := defaultRateLimiterRegistry.Limiter(h.name); found {
 			return h.handleRequestUsingNamedLimiter(req, next, limiter, h.name, limiterFn)
 		}
-		// the reference implementation ( + resolveMaxAttempts L207-211):
-		// a non-numeric limiter name that is not registered always throws
-		// MissingRateLimiterException — even when an explicit maxAttempts was
-		// provided alongside (resolveMaxAttempts re-checks the registry and
-		// throws for every non-numeric value). A numeric spec ("60", "10,1",
-		// "60|120") is not a limiter name and keeps the plain path.
+		// A non-numeric limiter name that is not registered always panics with
+		// MissingRateLimiterError — even when an explicit maxAttempts was
+		// provided. A numeric spec ("60", "10,1", "60|120") is not a limiter
+		// name and keeps the plain path.
 		if !isNumericThrottleSpec(h.name) {
 			panic(ForMissingRateLimiter(h.name))
 		}
@@ -165,9 +148,8 @@ func (h *ThrottleMiddleware) Process(req *Request, next Closure) any {
 		maxAttempts = h.resolveMaxAttempts(h.maxAttemptsRaw)
 	} else if maxAttempts == 0 && isNumericThrottleSpec(h.name) {
 		// A numeric spec given in the limiter-name slot ("60", "10,1") is a
-		// plain maxAttempts policy, not a limiter reference (the reference implementation:
-		// throttle:60,1 — the numeric first parameter resolves through
-		// resolveMaxAttempts and never names a limiter).
+		// plain maxAttempts policy, not a limiter reference: it resolves through
+		// resolveMaxAttempts and never names a limiter.
 		maxAttempts = h.resolveMaxAttempts(strings.SplitN(h.name, ",", 2)[0])
 	}
 	prefix := h.prefix
@@ -183,8 +165,7 @@ func (h *ThrottleMiddleware) Process(req *Request, next Closure) any {
 }
 
 // handleRequestUsingNamedLimiter resolves the policy from a named limiter
-// callback, which may return *Limit, []*Limit, *Unlimited or *Response
-// .
+// callback, which may return *Limit, []*Limit, *Unlimited or *Response.
 func (h *ThrottleMiddleware) handleRequestUsingNamedLimiter(req *Request, next Closure, limiter RateLimiter, limiterName string, limiterFn func(*Request) any) any {
 	result := limiterFn(req)
 
@@ -205,8 +186,7 @@ func (h *ThrottleMiddleware) handleRequestUsingNamedLimiter(req *Request, next C
 	case []*Limit:
 		raw = v
 	default:
-		// nil or unknown results enforce no limits
-		// → empty limits).
+		// nil or unknown results enforce no limits.
 		raw = nil
 	}
 
@@ -227,9 +207,8 @@ func (h *ThrottleMiddleware) handleRequestUsingNamedLimiter(req *Request, next C
 	return h.handleRequest(req, next, limiter, limits)
 }
 
-// namedBucketKey derives the counter bucket for a named limiter
-// when keys are hashed,
-// "limiterName:limitKey" otherwise).
+// namedBucketKey derives the counter bucket for a named limiter: an MD5 hash of
+// "limiterName+limitKey" when keys are hashed, "limiterName:limitKey" otherwise.
 func (h *ThrottleMiddleware) namedBucketKey(limiterName, limitKey string) string {
 	if h.shouldHashKeys {
 		sum := md5.Sum([]byte(limiterName + limitKey))
@@ -239,8 +218,7 @@ func (h *ThrottleMiddleware) namedBucketKey(limiterName, limitKey string) string
 }
 
 // handleRequest checks every bucket before the request runs, counts the hits,
-// then runs after-callbacks and adds headers on the way out
-// .
+// then runs after-callbacks and adds headers on the way out.
 func (h *ThrottleMiddleware) handleRequest(req *Request, next Closure, limiter RateLimiter, limits []throttleLimit) any {
 	for i := range limits {
 		if limiter.TooManyAttempts(limits[i].key, limits[i].maxAttempts) {
@@ -266,8 +244,7 @@ func (h *ThrottleMiddleware) handleRequest(req *Request, next Closure, limiter R
 	return response
 }
 
-// remainingAttempts calculates the attempts left for a key
-// .
+// remainingAttempts returns the attempts left for a key, never below zero.
 func (h *ThrottleMiddleware) remainingAttempts(limiter RateLimiter, key string, maxAttempts int) int {
 	remaining := maxAttempts - limiter.Attempts(key)
 	if remaining < 0 {
@@ -277,15 +254,9 @@ func (h *ThrottleMiddleware) remainingAttempts(limiter RateLimiter, key string, 
 }
 
 // resolveMaxAttempts resolves a string policy spec to a concrete number. A
-// "maxAttempts,userKey" pair separated by "|" (the reference implementation:
-// resolveMaxAttempts L194-214) resolves to the guest segment (index 0): this
-// port has no auth component, so the user resolution is always empty and the reference implementation
-// itself would pick the guest segment; an application can still resolve the
-// user segment itself by inspecting the spec inside its named limiter
-// callbacks. A non-numeric segment means no matching rate limiter exists
-// (the reference implementation: — the reference implementation also resolves a
-// non-numeric value as an authenticated user attribute, which has no
-// equivalent here).
+// "guest|user" pair resolves to the guest segment (index 0); the user segment
+// is left to the application's named limiter callbacks. A non-numeric segment
+// panics with MissingRateLimiterError.
 func (h *ThrottleMiddleware) resolveMaxAttempts(spec string) int {
 	if strings.Contains(spec, "|") {
 		spec = strings.SplitN(spec, "|", 2)[0]
@@ -296,10 +267,9 @@ func (h *ThrottleMiddleware) resolveMaxAttempts(spec string) int {
 	panic(ForMissingRateLimiter(spec))
 }
 
-// isNumericThrottleSpec reports whether the given throttle spec is purely
-// numeric (the reference implementation: is_numeric on the middleware's maxAttempts parameter —
-// e.g. "60", "10,1" or "60|120" where every comma/pipe separated segment is a
-// number), i.e. not a named rate limiter reference.
+// isNumericThrottleSpec reports whether the throttle spec is purely numeric,
+// i.e. every comma/pipe separated segment is a number ("60", "10,1", "60|120").
+// Such a spec is a plain policy, not a named rate limiter reference.
 func isNumericThrottleSpec(spec string) bool {
 	spec = strings.TrimSpace(spec)
 	if spec == "" {
@@ -313,12 +283,9 @@ func isNumericThrottleSpec(spec string) bool {
 	return true
 }
 
-// resolveRequestSignature builds the per-client throttle key: "host|ip" from
-// the request (port stripped from the Host header, plus the client IP), hashed
-// when key hashing is enabled (the reference implementation: resolveRequestSignature —
-// authenticated user id, else route domain + request ip; this port has no auth
-// component, so the request host and client IP are used — no method, path or
-// user-agent participates).
+// resolveRequestSignature builds the per-client throttle key: "host|ip" from the
+// request (port stripped from the Host header, plus the client IP), hashed when
+// key hashing is enabled. No method, path or user-agent participates.
 func (h *ThrottleMiddleware) resolveRequestSignature(req *Request) string {
 	host := ""
 	if httpReq := req.GetHttpRequest(); httpReq != nil {
@@ -330,8 +297,7 @@ func (h *ThrottleMiddleware) resolveRequestSignature(req *Request) string {
 	return h.formatIdentifier(host + "|" + req.ClientIP())
 }
 
-// formatIdentifier hashes the identifier when key hashing is enabled
-// .
+// formatIdentifier hashes the identifier when key hashing is enabled.
 func (h *ThrottleMiddleware) formatIdentifier(value string) string {
 	if !h.shouldHashKeys {
 		return value
@@ -340,13 +306,10 @@ func (h *ThrottleMiddleware) formatIdentifier(value string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// buildException creates the "too many attempts" result
-// (the reference implementation: buildException — throws ThrottleRequestsException('Too Many
-// Attempts.', headers) carrying the rate-limit headers, or wraps the limit's
-// responseCallback result in an HttpResponseException). The exception is
-// rendered immediately so the pipeline keeps observing a *Response; use the
-// returned response's headers for introspection. When the limit carries a
-// responseCallback the callback builds the response from the computed headers.
+// buildException creates the "too many attempts" result. When the limit carries
+// a responseCallback the callback builds the response from the computed headers;
+// otherwise the ThrottleRequestsException is rendered immediately, so the
+// pipeline keeps observing a *Response.
 func (h *ThrottleMiddleware) buildException(req *Request, limiter RateLimiter, limit throttleLimit) any {
 	retryAfter := limiter.AvailableIn(limit.key)
 	headers := map[string]string{
@@ -366,9 +329,8 @@ func (h *ThrottleMiddleware) buildException(req *Request, limiter RateLimiter, l
 	return exception.Render()
 }
 
-// addHeaders attaches the rate-limit headers to a *Response result,
-// preserving an already-smaller X-RateLimit-Remaining (the reference implementation: addHeaders +
-// getHeaders protection branch L302-306). retryAfter < 0 means the request was
+// addHeaders attaches the rate-limit headers to a *Response result, preserving
+// an already-smaller X-RateLimit-Remaining. retryAfter < 0 means the request was
 // not limited, so no Retry-After / X-RateLimit-Reset are emitted.
 func (h *ThrottleMiddleware) addHeaders(result any, maxAttempts, remainingAttempts, retryAfter int) any {
 	res, ok := result.(*Response)

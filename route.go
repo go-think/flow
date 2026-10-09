@@ -12,16 +12,14 @@ import (
 	"time"
 )
 
-// routeLocks provides per-URI atomic locks for Block-enabled routes.
+// LockProvider acquires per-URI locks for Block-enabled routes.
 type LockProvider interface {
 	Acquire(key string, lockSeconds, waitSeconds int) (release func(), ok bool)
 }
 
 var routeLocks sync.Map
 
-// matchMethod reports whether a request verb matches a target verb
-// (the reference implementation: MethodValidator compares with in_array — both sides are upper
-// case by construction, so the comparison is case-insensitive in effect).
+// matchMethod reports whether a request verb matches a target verb, ignoring case.
 func matchMethod(method, target string) bool {
 	return strings.EqualFold(target, method)
 }
@@ -39,11 +37,11 @@ func matchMethods(method string, target []string) bool {
 // optionalParamRegex strips unprovided optional parameters, e.g. /{param?}.
 var optionalParamRegex = regexp.MustCompile(`(/)?\{[a-zA-Z0-9_]+\?\}`)
 
-// Route is a single registered route: its verb list, URI pattern, constraints,
-// defaults, middleware and action, plus the compiled matching artifacts.
 // syncOnceAlias is an alias for sync.Once used in recompilation.
 type syncOnceAlias = sync.Once
 
+// Route is a single registered route: its verb list, URI pattern, constraints,
+// defaults, middleware and action, plus the compiled matching artifacts.
 type Route struct {
 	methods           []string
 	uri               string
@@ -68,19 +66,17 @@ type Route struct {
 	waitSeconds       int
 	validators        []RouteValidator
 
-	router *router // back reference for resolver/registry lookups
+	router *router // owning router, for resolver and registry lookups
 
-	// Bind-time parameter snapshot lives on the request so concurrent
-	// dispatches sharing one Route never race (the reference implementation stores the state on
-	// the route itself, which is safe under PHP's per-worker model).
+	// Bind-time parameter snapshots live on the request, so concurrent
+	// dispatches sharing one Route never race.
 
 	expanded           []*compiledPattern
 	compiledHostRegex  *regexp.Regexp
 	hostParameterNames []string
 	compileOnce        sync.Once
 
-	// computedMiddleware caches the gathered middleware list
-	//.
+	// computedMiddleware caches the gathered middleware list.
 	middlewareMu       sync.Mutex
 	computedMiddleware []any
 }
@@ -103,7 +99,7 @@ func (r *Route) URI() string {
 	return r.uri
 }
 
-// Uri is the the reference implementation-style spelling of URI.
+// Uri returns the raw path pattern of the route (alias of URI).
 func (r *Route) Uri() string {
 	return r.uri
 }
@@ -113,9 +109,8 @@ func (r *Route) GetUri() string {
 	return r.uri
 }
 
-// SetUri updates the route URI pattern (the reference implementation: setUri + parseUri — the URI
-// is passed through, extracting binding fields and rewriting
-// "{user:id}" placeholders to "{user}").
+// SetUri updates the route URI pattern, extracting binding fields and
+// rewriting "{user:id}" placeholders to "{user}".
 func (r *Route) SetUri(uri string) *Route {
 	parsed := ParseRouteUri(uri)
 	r.uri = "/" + strings.TrimLeft(parsed.URI, "/")
@@ -143,12 +138,9 @@ func (r *Route) GetPrefix() string {
 	return r.prefix
 }
 
-// ExcludedControllerMiddleware returns controller middleware excluded via PHP
-// attributes (the reference implementation: collects the
-// WithoutMiddleware attribute only). Go has no attribute mechanism: controller
-// middleware filtered by an entry's Except list is already removed in
-// GetMiddleware (methodExcludedByOptions), and per the reference implementation such entries never
-// join the route's excluded-middleware list, so this returns nil.
+// ExcludedControllerMiddleware returns the controller middleware excluded for
+// this route. It always returns nil: controller middleware filtered by an
+// entry's Except list is already removed in GetMiddleware.
 func (r *Route) ExcludedControllerMiddleware() []any {
 	return nil
 }
@@ -197,14 +189,13 @@ func normalizeRuntimeActionName(name string) string {
 	return name
 }
 
-// Name returns the route name.
+// GetName returns the route name.
 func (r *Route) GetName() string {
 	return r.name
 }
 
-// Name adds or changes the route name. Like the reference name(), the given name
-// is concatenated onto any name prefix the route already carries (group "as"
-// prefixes), so name("admin.") + name("users") yields "admin.users".
+// Name appends the given name to any name prefix the route already carries, so
+// name("admin.") then name("users") yields "admin.users".
 func (r *Route) Name(name string) *Route {
 	r.name += name
 	return r
@@ -268,8 +259,7 @@ func (r *Route) SetWhere(name, expression string) *Route {
 	return r
 }
 
-// WhereNumber adds a numeric regex constraint to parameters
-// .
+// WhereNumber adds a numeric regex constraint to the named parameters.
 func (r *Route) WhereNumber(names ...string) *Route {
 	for _, name := range names {
 		r.SetWhere(name, "[0-9]+")
@@ -277,8 +267,7 @@ func (r *Route) WhereNumber(names ...string) *Route {
 	return r
 }
 
-// WhereAlpha adds an alphabetic regex constraint to parameters
-// .
+// WhereAlpha adds an alphabetic regex constraint to the named parameters.
 func (r *Route) WhereAlpha(names ...string) *Route {
 	for _, name := range names {
 		r.SetWhere(name, "[a-zA-Z]+")
@@ -286,8 +275,7 @@ func (r *Route) WhereAlpha(names ...string) *Route {
 	return r
 }
 
-// WhereAlphaNumeric adds an alphanumeric regex constraint to parameters
-// .
+// WhereAlphaNumeric adds an alphanumeric regex constraint to the named parameters.
 func (r *Route) WhereAlphaNumeric(names ...string) *Route {
 	for _, name := range names {
 		r.SetWhere(name, "[a-zA-Z0-9]+")
@@ -295,8 +283,7 @@ func (r *Route) WhereAlphaNumeric(names ...string) *Route {
 	return r
 }
 
-// WhereUuid adds a UUID regex constraint to parameters
-// .
+// WhereUuid adds a UUID regex constraint to the named parameters.
 func (r *Route) WhereUuid(names ...string) *Route {
 	for _, name := range names {
 		r.SetWhere(name, `[\da-fA-F]{8}-[\da-fA-F]{4}-[\da-fA-F]{4}-[\da-fA-F]{4}-[\da-fA-F]{12}`)
@@ -304,8 +291,7 @@ func (r *Route) WhereUuid(names ...string) *Route {
 	return r
 }
 
-// WhereUlid adds a ULID regex constraint to parameters
-// .
+// WhereUlid adds a ULID regex constraint to the named parameters.
 func (r *Route) WhereUlid(names ...string) *Route {
 	for _, name := range names {
 		r.SetWhere(name, `[0-7][0-9a-hjkmnp-tv-zA-HJKMNP-TV-Z]{25}`)
@@ -313,9 +299,8 @@ func (r *Route) WhereUlid(names ...string) *Route {
 	return r
 }
 
-// WhereIn adds an allowed values constraint to a parameter
-// (the reference implementation: — values are
-// joined without escaping).
+// WhereIn adds an allowed-values regex constraint to a parameter, joining the
+// allowed values with "|".
 func (r *Route) WhereIn(name string, allowed []string) *Route {
 	return r.SetWhere(name, strings.Join(allowed, "|"))
 }
@@ -345,15 +330,13 @@ func (r *Route) Metadata(key string, defaultValue ...any) any {
 	return nil
 }
 
-// MetadataAll returns the whole metadata map — the nil-key form of the reference implementation
-// getMetadata with a null key).
+// MetadataAll returns the whole metadata map.
 func (r *Route) MetadataAll() map[string]any {
 	return r.metadata
 }
 
 // MergeMetadata recursively merges the given metadata into the route's
-// metadata: map values are merged key-wise, other values replace
-// .
+// metadata: map values merge key-wise, other values replace.
 func (r *Route) MergeMetadata(metadata map[string]any) *Route {
 	r.metadata = mergeMetadataDeep(r.metadata, metadata)
 	return r
@@ -365,8 +348,8 @@ func (r *Route) ReplaceMetadata(metadata map[string]any) *Route {
 	return r
 }
 
-// mergeMetadataDeep implements: associated map
-// values merge recursively, list/scalar values replace wholesale.
+// mergeMetadataDeep merges two metadata maps: map values merge recursively,
+// other values replace wholesale.
 func mergeMetadataDeep(old, new map[string]any) map[string]any {
 	out := make(map[string]any, len(old)+len(new))
 	for k, v := range old {
@@ -384,8 +367,8 @@ func mergeMetadataDeep(old, new map[string]any) map[string]any {
 	return out
 }
 
-// strIs replicates: the "*" wildcard becomes ".*",
-// the rest is quoted, the match is anchored and case-sensitive.
+// strIs reports whether value matches pattern, where "*" is a wildcard; the
+// match is anchored and case-sensitive.
 func strIs(pattern, value string) bool {
 	if pattern == value {
 		return true
@@ -416,8 +399,8 @@ func (r *Route) IsFallback() bool {
 	return r.fallback
 }
 
-// Validators returns the route validators to run for this route
-// .
+// Validators returns the route validators to run for this route, falling back
+// to the default set.
 func (r *Route) Validators() []RouteValidator {
 	if r.validators != nil {
 		return r.validators
@@ -425,15 +408,14 @@ func (r *Route) Validators() []RouteValidator {
 	return defaultValidators()
 }
 
-// SetValidators sets custom route validators for this route
-// .
+// SetValidators sets custom route validators for this route.
 func (r *Route) SetValidators(validators []RouteValidator) *Route {
 	r.validators = validators
 	return r
 }
 
-// Matches reports whether the candidate route satisfies all validators for the request
-// .
+// Matches reports whether the route satisfies all validators for the request;
+// method validation is skipped when includingMethod is false.
 func (r *Route) Matches(request *Request, includingMethod ...bool) bool {
 	checkMethod := true
 	if len(includingMethod) > 0 {
@@ -459,7 +441,7 @@ func (r *Route) Prefix(prefix string) *Route {
 	if r == nil {
 		return r
 	}
-	// updatePrefixOnAction — new prefix comes before the old one.
+	// New prefix comes before the existing one.
 	if newPrefix := strings.Trim(strings.TrimRight(prefix, "/")+"/"+strings.TrimLeft(r.prefix, "/"), "/"); newPrefix != "" {
 		r.prefix = newPrefix
 	}
@@ -515,8 +497,8 @@ func (r *Route) SetDomain(domain string) *Route {
 	return r
 }
 
-// Domain sets the route host restriction (the reference implementation: domain — the domain is
-// parsed with, merging any "{account:id}" binding fields).
+// Domain sets the route host restriction, parsing "{account:id}" placeholders
+// and merging their binding fields.
 func (r *Route) Domain(domain string) *Route {
 	parsed := ParseRouteUri(domain)
 	r.domain = parsed.URI
@@ -543,9 +525,8 @@ func (r *Route) GetDomain() string {
 	return domain
 }
 
-// ScopeBindings marks nested resource parameters as bound in a scoped chain.
-// The last scope decision wins (the reference implementation: scopeBindings overrides a previous
-// withoutScopedBindings call).
+// ScopeBindings marks nested resource parameters as bound in a scoped chain;
+// it overrides a previous call that disabled scoping.
 func (r *Route) ScopeBindings() *Route {
 	r.scopedBindings = true
 	r.scopedDisabled = false
@@ -557,14 +538,12 @@ func (r *Route) EnforcesScopedBindings() bool {
 	return r.scopedBindings
 }
 
-// BindingFields returns the binding fields declared for parameters
-// .
+// BindingFields returns the binding fields declared for route parameters.
 func (r *Route) BindingFields() map[string]string {
 	return r.bindingFields
 }
 
-// SetBindingFieldFor sets the custom binding field for a route parameter
-// .
+// SetBindingFieldFor sets the custom binding field for a route parameter.
 func (r *Route) SetBindingFieldFor(parameter, field string) *Route {
 	if r.bindingFields == nil {
 		r.bindingFields = make(map[string]string)
@@ -574,22 +553,19 @@ func (r *Route) SetBindingFieldFor(parameter, field string) *Route {
 	return r
 }
 
-// SetBindingFields replaces the map of parameter binding fields
-// .
+// SetBindingFields replaces the map of parameter binding fields.
 func (r *Route) SetBindingFields(fields map[string]string) *Route {
 	r.bindingFields = fields
 	r.invalidateCompile()
 	return r
 }
 
-// BindingFieldFor returns the binding field declared for a parameter
-// .
+// BindingFieldFor returns the binding field declared for a parameter.
 func (r *Route) BindingFieldFor(name string) string {
 	return r.bindingFieldFor(name)
 }
 
-// WithTrashed marks the route as allowing soft-deleted entities in bindings
-// .
+// WithTrashed marks the route as allowing soft-deleted entities in bindings.
 func (r *Route) WithTrashed(withTrashed ...bool) *Route {
 	value := true
 	if len(withTrashed) > 0 {
@@ -609,8 +585,7 @@ func (r *Route) SetWheres(wheres map[string]string) *Route {
 	if r.wheres == nil {
 		r.wheres = make(map[string]string)
 	}
-	// the reference setWheres merges into the existing constraints (it calls
-	// where() per entry) rather than replacing them.
+	// SetWheres merges into the existing constraints rather than replacing them.
 	for k, v := range wheres {
 		r.wheres[k] = v
 	}
@@ -633,9 +608,7 @@ func (r *Route) Default(key string, value any) *Route {
 	return r
 }
 
-// HasParameters reports whether the route declares parameters. the reference implementation checks
-// the bound-parameter state on the route; flow keeps binding state per request
-// for concurrency safety, so the declaration is reported here.
+// HasParameters reports whether the route declares any parameters.
 func (r *Route) HasParameters() bool {
 	return len(r.ParameterNames()) > 0
 }
@@ -658,16 +631,14 @@ func (r *Route) WithoutMiddleware(middlewares ...any) *Route {
 	return r
 }
 
-// ExcludedMiddleware returns the middleware that should be removed from the
-// route: the route-level exclusions merged with the controller-level ones
-// .
+// ExcludedMiddleware returns the middleware to remove from the route:
+// route-level exclusions merged with controller-level ones.
 func (r *Route) ExcludedMiddleware() []any {
 	out := append([]any(nil), r.withoutMiddleware...)
 	return append(out, r.ExcludedControllerMiddleware()...)
 }
 
-// Middleware returns the raw middleware entries, or appends when args provided
-// .
+// Middleware appends the given entries to the route's middleware.
 func (r *Route) Middleware(middleware ...any) *Route {
 	if len(middleware) == 0 {
 		return r
@@ -686,18 +657,18 @@ func (r *Route) GetMiddleware() []any {
 // controller.
 func (r *Route) ControllerMiddleware() []any {
 	if action, ok := r.handler.(ControllerAction); ok {
-		dispatcher := r.router.getControllerDispatcher()
-		if controller, err := dispatcher.ResolveController(action); err == nil {
-			return dispatcher.GetMiddleware(controller, action.Method)
+		if controller, err := r.router.resolveController(action.Controller); err == nil {
+			dispatcher := r.router.getControllerDispatcher()
+			return controllerMiddlewareToRawList(dispatcher.GetMiddleware(controller, action.Method))
 		}
 	}
 	return nil
 }
 
-// GatherMiddleware returns all middleware for the route: the entries attached
-// at registration plus the middleware the controller declares for its method
-// (with only/except filters applied), deduplicated and cached
-// .
+// GatherMiddleware returns the route's middleware: entries attached at
+// registration plus the middleware the controller declares for its method
+// (with only/except filters applied), deduplicated and cached. Safe for
+// concurrent use.
 func (r *Route) GatherMiddleware() []any {
 	r.middlewareMu.Lock()
 	defer r.middlewareMu.Unlock()
@@ -706,24 +677,22 @@ func (r *Route) GatherMiddleware() []any {
 	}
 	out := append([]any(nil), r.middlewares...)
 	if action, ok := r.handler.(ControllerAction); ok {
-		dispatcher := r.router.getControllerDispatcher()
-		if controller, err := dispatcher.ResolveController(action); err == nil {
-			out = append(out, dispatcher.GetMiddleware(controller, action.Method)...)
+		if controller, err := r.router.resolveController(action.Controller); err == nil {
+			dispatcher := r.router.getControllerDispatcher()
+			out = append(out, controllerMiddlewareToRawList(dispatcher.GetMiddleware(controller, action.Method))...)
 		}
 	}
 	r.computedMiddleware = UniqueMiddleware(out)
 	return r.computedMiddleware
 }
 
-// FlushComputedMiddleware clears the gathered middleware cache
-// .
+// FlushComputedMiddleware clears the gathered middleware cache.
 func (r *Route) FlushComputedMiddleware() *Route {
 	r.computedMiddleware = nil
 	return r
 }
 
-// HandleMatchedRoute binds the request parameters and returns the bound route
-// .
+// HandleMatchedRoute binds the request parameters and returns the route.
 func (r *Route) HandleMatchedRoute(request *Request) *Route {
 	r.Bind(request)
 	return r
@@ -743,26 +712,20 @@ func (r *Route) MatchesMethodAndPath(method, path string) bool {
 	return false
 }
 
-// Bind extracts the route parameters for a request, stores them on the route
-// (the reference implementation: bind — + originalParameters
-// snapshot) and mirrors them onto the request for Context access. Host
-// parameters extracted from a dynamic domain come first, path parameters
-// follow in declaration order, and defaults fill anything missing. The bound
-// path is derived from the request itself (RouteParameterBinder uses
-// req.GetPath()), so callers that need a different path — e.g. the trailing
-// slash trim of the reference requestWithoutTrailingSlash — swap it on a
-// request copy before calling.
+// Bind extracts the route parameters for a request and stores them on the
+// request for Context access. Host parameters from a dynamic domain come first,
+// path parameters follow in declaration order, and defaults fill anything
+// missing. The path is read from the request, so callers needing a different
+// path must pass a modified request copy.
 func (r *Route) Bind(req *Request) []*parameter {
 	r.compile()
 
 	binder := NewRouteParameterBinder(r)
 	parameters := binder.Parameters(req)
 
-	// A declared parameter that produced no match is padded with "" — Go
-	// cannot pass nil to a string parameter, so this is the zero-value
-	// coercion of the reference null at the call boundary. Model/pointer binding
-	// skips empty values (parseParams), mirroring the reference implementation where the parameter
-	// is absent and the binding is skipped.
+	// A declared parameter that produced no match is padded with "". Model and
+	// pointer binding skip empty values, so the argument falls through to its
+	// zero value at the call boundary.
 	for _, name := range r.ParameterNames() {
 		found := false
 		for _, p := range parameters {
@@ -782,9 +745,8 @@ func (r *Route) Bind(req *Request) []*parameter {
 		}
 	}
 
-	// Mirror the parameters onto the request and snapshot the original values
-	// there too (the reference implementation: parameters + originalParameters; flow keeps the
-	// state per-request so shared routes stay concurrency-safe).
+	// Copy the parameters onto the request and snapshot the original values,
+	// keeping the state per request so shared routes stay concurrency-safe.
 	if req != nil {
 		for _, p := range parameters {
 			req.SetRouteParam(p.name, p.value)
@@ -795,12 +757,8 @@ func (r *Route) Bind(req *Request) []*parameter {
 	return parameters
 }
 
-// Run executes the route action and returns its raw result. The bound
-// parameters are recovered from the request mirror — the per-request state
-// flow substitutes for the reference route-held parameters, which a shared
-// Route cannot carry safely. A route without an action fails like
-// the reference ("Route [uri] has no action.")
-// instead of silently returning nil.
+// Run executes the route action and returns its raw result. Bound parameters
+// are recovered from the request. It panics when the route has no action.
 func (r *Route) Run(request *Request) (result any) {
 	if r == nil {
 		return nil
@@ -833,22 +791,7 @@ func (r *Route) Run(request *Request) (result any) {
 		}
 	}
 
-	// The parameters bound by Bind ride the request mirror; recover them by
-	// the declared parameter names in host-first order — the same order Bind
-	// returns them (the reference binder merges host parameters ahead of the
-	// path parameters). Scalar injection is positional, so this order is
-	// load-bearing: a handler func(account, user string) on
-	// "{account}.myapp.com/users/{user}" must receive the host value first.
-	var parsedParams []*parameter
-	if request != nil {
-		r.compile()
-		for _, name := range r.ParameterNames() {
-			parsedParams = append(parsedParams, &parameter{
-				name:  name,
-				value: request.GetRouteParam(name),
-			})
-		}
-	}
+	parsedParams := r.boundParameters(request)
 
 	// Dedicated route controllers (view/redirect) render directly.
 	if action, ok := r.handler.(interface{ Render(*Request) any }); ok {
@@ -865,7 +808,7 @@ func (r *Route) Run(request *Request) (result any) {
 
 	// Controller actions are dispatched through the ControllerDispatcher.
 	if action, ok := r.handler.(ControllerAction); ok {
-		result, err := r.router.getControllerDispatcher().Dispatch(r, request, action, parsedParams)
+		result, err := r.router.getControllerDispatcher().Dispatch(r, action.Controller, action.Method, request)
 		if err != nil {
 			// Controller resolution failures are programming errors; they are
 			// reported through the exception pipeline like any other panic.
@@ -874,7 +817,7 @@ func (r *Route) Run(request *Request) (result any) {
 		return result
 	}
 	if actionPtr, ok := r.handler.(*ControllerAction); ok && actionPtr != nil {
-		result, err := r.router.getControllerDispatcher().Dispatch(r, request, *actionPtr, parsedParams)
+		result, err := r.router.getControllerDispatcher().Dispatch(r, actionPtr.Controller, actionPtr.Method, request)
 		if err != nil {
 			panic(err)
 		}
@@ -928,8 +871,8 @@ func (r *Route) ValidateParams(params []*parameter) bool {
 	return true
 }
 
-// Parameter returns the route parameter value for the request
-// — the state is stored per request).
+// Parameter returns the route parameter value for the request, or the optional
+// default when the parameter is absent.
 func (r *Route) Parameter(request *Request, name string, defaultValue ...string) string {
 	if request == nil {
 		if len(defaultValue) > 0 {
@@ -940,8 +883,7 @@ func (r *Route) Parameter(request *Request, name string, defaultValue ...string)
 	return request.GetRouteParam(name, defaultValue...)
 }
 
-// Parameters returns the route parameters of the request
-// ).
+// Parameters returns the route parameters of the request, keyed by name.
 func (r *Route) Parameters(request *Request) map[string]string {
 	out := make(map[string]string)
 	if request == nil {
@@ -979,8 +921,7 @@ func (r *Route) compile() {
 				groups := regParam.FindStringSubmatch(m)
 				paramName := groups[1]
 				r.hostParameterNames = append(r.hostParameterNames, paramName)
-				// Record "{account:id}" binding fields declared in the domain
-				// merges binding fields).
+				// Record binding fields declared in the domain, e.g. "{account:id}".
 				if groups[2] != "" {
 					if r.bindingFields == nil {
 						r.bindingFields = map[string]string{}
@@ -1028,10 +969,8 @@ func (r *Route) compile() {
 	})
 }
 
-// invalidateCompile clears derived regex state after a route mutator changes
-// the URI, domain, constraints, or binding fields. the reference implementation builds its route
-// matcher after these fluent calls; immediate-registration mode must therefore
-// rebuild rather than retain the regex compiled during Add.
+// invalidateCompile clears derived regex state after a mutator changes the URI,
+// domain, constraints, or binding fields, forcing the next match to recompile.
 func (r *Route) invalidateCompile() {
 	r.compileOnce = sync.Once{}
 	r.expanded = nil
@@ -1046,12 +985,31 @@ func (r *Route) getParameterResolver() ParameterResolver {
 	return nil
 }
 
+// boundParameters recovers the parameters bound by Bind from the request, in
+// host-first declaration order. The order is positional and load-bearing for
+// scalar injection; absent optional parameters are kept as "" so their slot
+// survives.
+func (r *Route) boundParameters(request *Request) []*parameter {
+	if request == nil {
+		return nil
+	}
+	r.compile()
+	names := r.ParameterNames()
+	params := make([]*parameter, 0, len(names))
+	for _, name := range names {
+		params = append(params, &parameter{
+			name:  name,
+			value: request.GetRouteParam(name),
+		})
+	}
+	return params
+}
+
 // parseParams builds the argument list for the action: *Request first, then
 // route parameters (explicit binders, implicit bindings, positional scalars),
-// and container-provided dependencies (ParameterResolver) only when the
-// argument is class-typed and no route parameter supplies it — mirroring
-// the reference resolveMethodDependencies, where bound model instances take
-// priority over container resolution (alreadyInParameters).
+// and finally container-provided dependencies (via the ParameterResolver) for
+// class-typed arguments not supplied by a route parameter. Bound model
+// instances take priority over container resolution.
 func (r *Route) parseParams(value reflect.Value, request *Request, parameters []*parameter) []reflect.Value {
 	valueType := value.Type()
 	needNum := valueType.NumIn()
@@ -1064,9 +1022,8 @@ func (r *Route) parseParams(value reflect.Value, request *Request, parameters []
 	resolver := r.getParameterResolver()
 	var lastBoundModel any
 
-	// Phase 1 — explicit bindings (the reference implementation: SubstituteBindings middleware →
-	// → performBinding). All binders run up front
-	// and a failure propagates before the action executes.
+	// Phase 1: explicit bindings. All binders run up front; a failure propagates
+	// before the action executes.
 	var resolved map[string]any
 	if r.router != nil {
 		resolved = r.router.SubstituteBindings(r, request, parameters)
@@ -1100,10 +1057,8 @@ func (r *Route) parseParams(value reflect.Value, request *Request, parameters []
 				p.name = cleanName
 			}
 
-			// An absent optional parameter (padded with "" — see Bind) must
-			// not trigger model binding: the reference implementation never sees the parameter, so
-			// the argument falls through to the zero value (the reference implementation:
-			// getParameterName returns null → continue).
+			// An absent optional parameter (padded with ""; see Bind) does not
+			// trigger model binding; the argument falls through to its zero value.
 			if p.value == "" {
 				if _, isBound := resolved[p.name]; !isBound {
 					paramIdx++
@@ -1155,9 +1110,8 @@ func (r *Route) parseParams(value reflect.Value, request *Request, parameters []
 			}
 
 			// 4. Class-typed argument with a remaining route parameter: resolve
-			// from the container without consuming the parameter
-			// (the reference implementation: alreadyInParameters — the route parameter stays
-			// available for the scalar arguments that follow).
+			// from the container without consuming the parameter, which stays
+			// available for the scalar arguments that follow.
 			if resolver != nil {
 				if val, ok := resolver.ResolveParameter(t, request); ok {
 					in = append(in, val)
@@ -1168,8 +1122,7 @@ func (r *Route) parseParams(value reflect.Value, request *Request, parameters []
 			continue
 		}
 
-		// No route parameter left: container dependency, then zero value
-		//.
+		// No route parameter left: container dependency, then zero value.
 		if resolver != nil {
 			if val, ok := resolver.ResolveParameter(t, request); ok {
 				in = append(in, val)

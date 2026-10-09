@@ -2,11 +2,10 @@ package flow
 
 import "strings"
 
-// NewRouter creates a Router matching the reference constructor pattern:
-// NewRouter(events, container). When called with no arguments it uses
-// immediate route registration: routes are materialized
-// the moment they are declared.
-
+// NewRouter creates a Router. It accepts an optional event dispatcher and
+// container; nil may be passed for either. Routes are registered immediately:
+// they are materialized the moment they are declared.
+//
 // NewRouter() → immediate registration, no container
 // NewRouter(nil, myContainer) → immediate registration + container
 // NewRouter(eventsFn, nil) → immediate registration + events
@@ -23,8 +22,8 @@ func NewRouter(events EventDispatcher, container Container) Router {
 		container:         container,
 		resourceSingular:  true,
 	}
-	// the reference framework maps the "can" middleware alias; the default gate
-	// denies every ability unless the application overrides the alias.
+	// Map the "can" middleware alias; the default gate denies every ability
+	// unless the application overrides the alias.
 	rt.middlewareAliases["can"] = ParameterizedMiddleware(canMiddlewareFactory)
 	rt.events = events
 	return rt
@@ -89,8 +88,8 @@ func (r *router) buildRouteEntity(methods []string, pattern string, handler any)
 			defaults[k] = v
 		}
 		// In immediate-registration mode the declaring node holds route-local
-		// wheres set via Where/whereNumber before the verb call (the reference implementation:
-		// addWhereClausesToRoute merges the route's own where clause last).
+		// wheres set via Where/WhereNumber before the verb call; the route's own
+		// where clause is merged last.
 		if cur == r {
 			for k, v := range cur.wheres {
 				routeWheres[k] = v
@@ -106,10 +105,9 @@ func (r *router) buildRouteEntity(methods []string, pattern string, handler any)
 	for k, v := range routeDefaults {
 		defaults[k] = v
 	}
-	// the reference implementation applies to every route created after the
-	// pattern is registered. Immediate-registration mode uses this builder,
-	// so merge the root patterns before route compilation. Route-local and
-	// group constraints are already collected above and take precedence.
+	// Root patterns apply to every route created after the pattern is
+	// registered. Merge them before route compilation; route-local and group
+	// constraints are already collected above and take precedence.
 	for k, v := range root.patterns {
 		if _, exists := wheres[k]; !exists {
 			wheres[k] = v
@@ -127,8 +125,8 @@ func (r *router) buildRouteEntity(methods []string, pattern string, handler any)
 	if uri == "" || uri[0] != '/' {
 		uri = "/" + strings.TrimLeft(uri, "/")
 	}
-	// semantics: "{user:id}" placeholders are rewritten to
-	// "{user}" and their binding fields recorded.
+	// "{user:id}" placeholders are rewritten to "{user}" and their binding
+	// fields recorded.
 	parsedURI := ParseRouteUri(uri)
 	uri = parsedURI.URI
 
@@ -218,9 +216,8 @@ func (r *router) routeChainFor(route *Route) Router {
 	return chain
 }
 
-// Name adds to the registered route name (chain override) — the reference name()
-// concatenates onto the existing name prefix. The lookup indexes are refreshed
-// afterwards.
+// Name adds to the registered route name (chain override), concatenating onto
+// the existing name prefix. The lookup indexes are refreshed afterwards.
 func (c *routeChain) Name(name string) Router {
 	c.route.Name(name)
 	c.router.collection.RefreshNameLookups()
@@ -240,8 +237,7 @@ func (c *routeChain) WhereMap(wheres map[string]string) Router {
 	return c
 }
 
-// WhereNumber adds a numeric constraint to the registered route
-// .
+// WhereNumber adds a numeric constraint to the registered route.
 func (c *routeChain) WhereNumber(names ...string) Router {
 	for _, name := range names {
 		c.route.SetWhere(name, "[0-9]+")
@@ -249,8 +245,7 @@ func (c *routeChain) WhereNumber(names ...string) Router {
 	return c
 }
 
-// WhereAlpha adds an alphabetic constraint to the registered route
-// .
+// WhereAlpha adds an alphabetic constraint to the registered route.
 func (c *routeChain) WhereAlpha(names ...string) Router {
 	for _, name := range names {
 		c.route.SetWhere(name, "[a-zA-Z]+")
@@ -258,8 +253,7 @@ func (c *routeChain) WhereAlpha(names ...string) Router {
 	return c
 }
 
-// WhereAlphaNumeric adds an alphanumeric constraint to the registered route
-// .
+// WhereAlphaNumeric adds an alphanumeric constraint to the registered route.
 func (c *routeChain) WhereAlphaNumeric(names ...string) Router {
 	for _, name := range names {
 		c.route.SetWhere(name, "[a-zA-Z0-9]+")
@@ -267,8 +261,7 @@ func (c *routeChain) WhereAlphaNumeric(names ...string) Router {
 	return c
 }
 
-// WhereUuid adds a UUID constraint to the registered route
-// .
+// WhereUuid adds a UUID constraint to the registered route.
 func (c *routeChain) WhereUuid(names ...string) Router {
 	for _, name := range names {
 		c.route.SetWhere(name, `[\da-fA-F]{8}-[\da-fA-F]{4}-[\da-fA-F]{4}-[\da-fA-F]{4}-[\da-fA-F]{12}`)
@@ -276,8 +269,7 @@ func (c *routeChain) WhereUuid(names ...string) Router {
 	return c
 }
 
-// WhereUlid adds a ULID constraint to the registered route
-// .
+// WhereUlid adds a ULID constraint to the registered route.
 func (c *routeChain) WhereUlid(names ...string) Router {
 	for _, name := range names {
 		c.route.SetWhere(name, `[0-7][0-9a-hjkmnp-tv-zA-HJKMNP-TV-Z]{25}`)
@@ -285,8 +277,7 @@ func (c *routeChain) WhereUlid(names ...string) Router {
 	return c
 }
 
-// WhereIn adds an allowed-values constraint to the registered route
-// .
+// WhereIn adds an allowed-values constraint to the registered route.
 func (c *routeChain) WhereIn(name string, allowed []string) Router {
 	return c.Where(name, strings.Join(allowed, "|"))
 }

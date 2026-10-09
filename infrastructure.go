@@ -8,19 +8,18 @@ import (
 	"strings"
 )
 
-// SortMiddleware stably orders middleware entries by a priority list
-// . The algorithm replicates the reference implementation: only string
-// entries participate, the ":params" suffix is stripped before lookup, entries
-// missing from the priority list keep their original position, and an
+// SortMiddleware stably orders middleware entries by a priority list. Only
+// string entries participate, the ":params" suffix is stripped before lookup,
+// entries missing from the priority list keep their original position, and an
 // out-of-order entry is moved above the previously ranked one. The result is
-// deduplicated like the reference implementation ().
+// deduplicated.
 func SortMiddleware(priority []any, middlewares []any) []any {
 	return sortMiddlewareRanked(priority, middlewares, nil)
 }
 
 // sortMiddlewareRanked is SortMiddleware with an optional per-entry namer
-// override (used by the router so an alias entry is also ranked by the concrete
-// middleware it resolves to — the reference implementation sorts the resolved entries).
+// override, so an alias entry is also ranked by the concrete middleware it
+// resolves to.
 func sortMiddlewareRanked(priority []any, middlewares []any, namer func(any) []string) []any {
 	if len(priority) == 0 || len(middlewares) < 2 {
 		return UniqueMiddleware(middlewares)
@@ -54,10 +53,9 @@ func sortMiddlewareRanked(priority []any, middlewares []any, namer func(any) []s
 	return UniqueMiddleware(middlewares)
 }
 
-// middlewareNames resolves the names a middleware entry is ranked by
-// (the reference implementation: middlewareNames — the stripped head plus implemented
-// interfaces/parents; Go has no inheritance, so string entries are stripped of
-// their ":params" suffix and object entries are matched by type name).
+// middlewareNames resolves the names a middleware entry is ranked by: string
+// entries yield the head plus the full value, and object entries yield their
+// type name.
 func middlewareNames(middleware any) ([]string, bool) {
 	switch m := middleware.(type) {
 	case string:
@@ -74,10 +72,9 @@ func middlewareNames(middleware any) ([]string, bool) {
 	}
 }
 
-// priorityMapIndex returns the priority position of the first name found in
-// the priority list. the reference implementation iterates the entry's names first
-// (): the FIRST name that appears in the map
-// determines the rank, not the smallest map index across all names.
+// priorityMapIndex returns the priority position of the first name found in the
+// priority list: names are iterated in order, so the first name present in the
+// list determines the rank, not the smallest index across all names.
 func priorityMapIndex(priority []any, names []string) (int, bool) {
 	for _, name := range names {
 		for i, p := range priority {
@@ -106,8 +103,7 @@ func moveMiddleware(middlewares []any, from, to int) []any {
 	return m
 }
 
-// RouteAction parses and normalizes route actions
-// .
+// RouteAction parses and normalizes route actions.
 type RouteAction struct{}
 
 // Parse normalizes an action value: strings become ControllerAction, other
@@ -127,8 +123,8 @@ func (RouteAction) MakeInvokable(action string) string {
 	return action + "@Invoke"
 }
 
-// routeUriParamRegex mirrors the reference pattern
-// "/\{([\w\:]+?)\??\}/".
+// routeUriParamRegex matches a route parameter placeholder, optionally carrying
+// a binding field ("{user:id}") and an optional trailing "?".
 var routeUriParamRegex = regexp.MustCompile(`\{([\w:]+?)\??\}`)
 
 // RouteUri represents a parsed route URI with its parameter and binding-field
@@ -158,8 +154,7 @@ func ParseRouteUri(uri string) RouteUri {
 	return RouteUri{URI: uri, BindingFields: bindingFields}
 }
 
-// RouteParameterBinder binds route parameters from a request path
-// .
+// RouteParameterBinder binds route parameters from a request path.
 type RouteParameterBinder struct {
 	route *Route
 }
@@ -169,10 +164,9 @@ func NewRouteParameterBinder(route *Route) *RouteParameterBinder {
 	return &RouteParameterBinder{route: route}
 }
 
-// Parameters extracts the route parameters: path parameters first, then host
-// parameters when the route has a dynamic domain (host entries precede path
-// entries, the reference implementation: bindHostParameters), then defaults fill anything missing
-// . Empty matches are dropped like matchToKeys.
+// Parameters extracts the route parameters: host parameters first (when the
+// route has a dynamic domain), then path parameters, then defaults fill any
+// missing names. Empty matches are dropped.
 func (b *RouteParameterBinder) Parameters(req *Request) []*parameter {
 	b.route.compile()
 
@@ -213,8 +207,8 @@ func (b *RouteParameterBinder) Parameters(req *Request) []*parameter {
 	}
 
 	out := append(hostParams, pathParams...)
-	// the reference implementation merges host then path arrays, so a path parameter with the same
-	// name overrides the host entry (RouteParameterBinder: array_merge).
+	// Host entries come first, so a path parameter with the same name overrides
+	// the host entry.
 	for i, hp := range hostParams {
 		for _, pp := range pathParams {
 			if pp.name == hp.name {
@@ -245,9 +239,8 @@ func (b *RouteParameterBinder) Parameters(req *Request) []*parameter {
 			out = append(out, &parameter{name: name, value: toStringValue(value)})
 		}
 	}
-	// the reference replaceDefaults also merges default entries that are not
-	// route parameters (). Keys are sorted to
-	// keep the result deterministic (PHP foreach iterates in insertion order).
+	// Defaults that are not route parameters are appended too. Keys are sorted
+	// to keep the result deterministic.
 	if len(b.route.defaults) > 0 {
 		keys := make([]string, 0, len(b.route.defaults))
 		for key := range b.route.defaults {
@@ -272,8 +265,7 @@ func (b *RouteParameterBinder) Parameters(req *Request) []*parameter {
 	return out
 }
 
-// ImplicitRouteBinding resolves implicit model bindings for a route
-// .
+// ImplicitRouteBinding resolves implicit model bindings for a route.
 type ImplicitRouteBinding struct {
 	route *Route
 }
@@ -290,12 +282,10 @@ func (ib *ImplicitRouteBinding) ResolveForRoute(request *Request, params []*para
 	return ib.route.resolveBindingParameters(request, params)
 }
 
-// RouteBinding provides explicit binding registration helpers
-// .
+// RouteBinding provides explicit binding registration helpers.
 type RouteBinding struct{}
 
-// ForCallback returns a Binder that invokes the given callback
-// .
+// ForCallback returns a Binder that invokes the given callback.
 func ForCallback(fn func(value string, route *Route) (any, error)) Binder {
 	return Binder(fn)
 }
@@ -314,10 +304,10 @@ func ForModelOfClass(className string, resolver func(ctx context.Context, value 
 	}
 }
 
-// ForModel returns a Binder that resolves a model instance via Routable
-// . Soft-deleted records are resolved through
-// SoftDeletableRoutable when the route allows trashed bindings, and a missing
-// entity surfaces as *ModelNotFoundError like the reference modelNotFoundException.
+// ForModel returns a Binder that resolves a model instance via Routable.
+// Soft-deleted records are resolved through SoftDeletableRoutable when the
+// route allows trashed bindings, and a missing entity surfaces as
+// *ModelNotFoundError.
 func ForModel(model Routable) Binder {
 	return func(value string, route *Route) (any, error) {
 		ctx := context.Background()
@@ -333,25 +323,4 @@ func ForModel(model Routable) Binder {
 		}
 		return model.ResolveRouteBinding(ctx, value, "")
 	}
-}
-
-// ControllerMiddlewareOptions provides fluent only/except filters
-// .
-type ControllerMiddlewareOptions struct {
-	OnlyMethods   []string
-	ExceptMethods []string
-}
-
-// Only limits the middleware to the given methods. Both keys coexist like
-// the reference controllerMiddlewareOptions (only() writes only its own key; the
-// OR combination is resolved in methodExcludedByOptions).
-func (o *ControllerMiddlewareOptions) Only(methods ...string) *ControllerMiddlewareOptions {
-	o.OnlyMethods = methods
-	return o
-}
-
-// Except excludes the given methods from the middleware.
-func (o *ControllerMiddlewareOptions) Except(methods ...string) *ControllerMiddlewareOptions {
-	o.ExceptMethods = methods
-	return o
 }

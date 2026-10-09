@@ -7,14 +7,13 @@ import (
 	"strings"
 )
 
-// The following methods extend the Route entity with the the reference implementation-compatible
-// parameter bag, action accessors, authorization and atomic-lock API.
+// The following methods extend the Route entity with its parameter bag, action
+// accessors, authorization and atomic-lock API.
 
-// getAction returns the route action as the reference-shaped attribute bag
-// the look-ups consume: "uses" carries the action (the handler), and
-// "controller" carries the "Controller@method" identifier for controller
-// actions — mirroring the reference RouteAction::parse, which sets that key
-// for every controller action and never for closures.
+// getAction returns the route action as an attribute bag for look-ups: "uses"
+// carries the action (the handler), and "controller" carries the
+// "Controller@method" identifier, set only for controller actions and never for
+// closures.
 func (r *Route) getAction() map[string]any {
 	action := map[string]any{"uses": nil}
 	if r == nil {
@@ -55,8 +54,8 @@ func (r *Route) SetAction(handler any) *Route {
 	return r
 }
 
-// GetActionName returns the canonical action identifier
-// .
+// GetActionName returns the canonical action identifier, or "Closure" for
+// non-controller handlers.
 func (r *Route) GetActionName() string {
 	if r == nil || r.handler == nil {
 		return "Closure"
@@ -73,8 +72,8 @@ func (r *Route) GetActionName() string {
 	return "Closure"
 }
 
-// GetActionMethod returns the method name of the route action
-// .
+// GetActionMethod returns the method name of the route action, or "Closure"
+// when it is not a controller action.
 func (r *Route) GetActionMethod() string {
 	if r == nil || r.handler == nil {
 		return "Closure"
@@ -116,8 +115,8 @@ func (r *Route) Named(patterns ...string) bool {
 }
 
 // Can applies the "Authorize" / "can" middleware to the route with the given
-// models (the reference implementation: can — a "can:ability,models" entry is appended to the route
-// middleware so it executes with the rest of the stack).
+// models: a "can:ability,models" entry is appended to the route middleware so
+// it executes with the rest of the stack.
 func (r *Route) Can(ability string, models ...any) *Route {
 	entry := "can:" + ability
 	if len(models) > 0 {
@@ -131,10 +130,9 @@ func (r *Route) Can(ability string, models ...any) *Route {
 }
 
 // SignatureParameters extracts the parameter types of the route handler via
-// reflection. Supported
-// conditions: "type=pkg.Type" filters to the exact type and
-// "subClass=pkg.Interface" filters to types carrying that interface name in
-// their method receivers, mirroring the reference type/sub-class filters.
+// reflection. Supported conditions: "type=pkg.Type" filters to the exact type
+// and "subClass=pkg.Interface" filters to types carrying that interface name in
+// their method receivers.
 func (r *Route) SignatureParameters(conditions ...string) []reflect.StructField {
 	if r.handler == nil {
 		return nil
@@ -179,12 +177,11 @@ func (r *Route) SignatureParameters(conditions ...string) []reflect.StructField 
 }
 
 // typeImplements reports whether the type's method set suggests it satisfies
-// the named interface (matched by interface method names appearing in the
-// type's method set).
+// the named interface: a match on a method type mentioning the interface name,
+// or on the type's own name.
 func typeImplements(t reflect.Type, interfaceName string) bool {
-	// Go reflection cannot resolve an interface type from a name string, so
-	// the check matches on the type declaring the interface's shape through
-	// its method set: a type name match or an exact method-set prefix match.
+	// The check matches on the type's method set: a method type containing the
+	// interface name, or the type's own name containing it.
 	for i := 0; i < t.NumMethod(); i++ {
 		if strings.Contains(t.Method(i).Type.String(), interfaceName) {
 			return true
@@ -193,9 +190,8 @@ func typeImplements(t reflect.Type, interfaceName string) bool {
 	return strings.Contains(t.String(), interfaceName)
 }
 
-// ParentOfParameter returns the route parameter that precedes the given
-// parameter in the URI (nested resource parent), or "" when none
-// .
+// ParentOfParameter returns the route parameter that precedes the given one in
+// the URI (its nested-resource parent), or "" when there is none.
 func (r *Route) ParentOfParameter(name string) string {
 	names := r.ParameterNames()
 	for i, n := range names {
@@ -222,8 +218,8 @@ func (r *Route) GetOptionalParameterNames() []string {
 	return out
 }
 
-// WithoutScopedBindings marks the route as NOT enforcing scoped bindings
-// . The last scope decision wins.
+// WithoutScopedBindings marks the route as not enforcing scoped bindings. The
+// last scope decision wins.
 func (r *Route) WithoutScopedBindings() *Route {
 	r.scopedBindings = false
 	r.scopedDisabled = true
@@ -249,9 +245,9 @@ func (r *Route) HttpsOnlyScheme() *Route {
 	return r
 }
 
-// Block configures the route to hold an atomic lock for the given duration
-// while handling the request (the reference implementation: block — defaults are 10 seconds for
-// both the lock and the wait).
+// Block configures the route to hold an atomic lock while handling the request.
+// The first argument is the lock duration and the second the wait duration, both
+// in seconds; both default to 10.
 func (r *Route) Block(lockSeconds ...int) *Route {
 	lock, wait := 10, 10
 	if len(lockSeconds) > 0 {
@@ -288,16 +284,16 @@ func (r *Route) WaitsFor() int {
 	return r.waitSeconds
 }
 
-// FlushController clears the computed middleware cache and the compiled
-// matcher state (the reference implementation: flushController — resets computedMiddleware and the
-// controller instance; flow resolves the controller on demand).
+// FlushController clears the computed middleware cache and invalidates the
+// compiled matcher state. The controller is resolved on demand.
 func (r *Route) FlushController() {
 	r.computedMiddleware = nil
 	r.invalidateCompile()
 }
 
-// GetControllerClass returns the controller class name for a controller action
-// .
+// GetControllerClass returns the name of the route's controller action, or the
+// type name of the controller instance when the action holds an instance. It
+// returns an empty string when the route is not a controller action.
 func (r *Route) GetControllerClass() string {
 	if r == nil {
 		return ""
@@ -309,6 +305,40 @@ func (r *Route) GetControllerClass() string {
 		return reflect.TypeOf(ca.Controller).String()
 	}
 	return ""
+}
+
+// IsControllerAction reports whether the route handler is a controller action.
+// It is true for a ControllerAction value or pointer and false for closures and
+// plain functions.
+func (r *Route) IsControllerAction() bool {
+	if r == nil {
+		return false
+	}
+	return isControllerActionHandler(r.handler)
+}
+
+// GetControllerMethod returns the method name of the route's controller action,
+// or an empty string when the route is not a controller action.
+func (r *Route) GetControllerMethod() string {
+	if r == nil {
+		return ""
+	}
+	switch ca := r.handler.(type) {
+	case ControllerAction:
+		return ca.Method
+	case *ControllerAction:
+		if ca != nil {
+			return ca.Method
+		}
+	}
+	return ""
+}
+
+// ParseControllerCallback returns the controller name and the method name of
+// the route's controller action; both are empty strings when the route is not a
+// controller action.
+func (r *Route) ParseControllerCallback() (string, string) {
+	return r.GetControllerClass(), r.GetControllerMethod()
 }
 
 // SetRouter sets the owning router back-reference.
@@ -327,16 +357,15 @@ func (r *Route) GetRouter() Router {
 	return r.router
 }
 
-// SetContainer is the the reference implementation-compatible alias for SetRouter (the router
-// serves as the IoC container in flow).
+// SetContainer is an alias for SetRouter; the router serves as the container.
 func (r *Route) SetContainer(container *router) *Route {
 	r.router = container
 	return r
 }
 
-// OriginalParameter returns the raw (pre-mutation) route parameter value for
-// the given name (the reference implementation: originalParameter — the snapshot taken at bind
-// time, before middleware or the dispatcher replaced values).
+// OriginalParameter returns the raw, pre-mutation route parameter value for the
+// given name: the snapshot taken at bind time, before middleware or the
+// dispatcher replaced any values.
 func (r *Route) OriginalParameter(request *Request, name string, defaultValue ...string) string {
 	if request == nil {
 		if len(defaultValue) > 0 {
@@ -347,8 +376,8 @@ func (r *Route) OriginalParameter(request *Request, name string, defaultValue ..
 	return request.GetOriginalRouteParam(name, defaultValue...)
 }
 
-// OriginalParameters returns the raw route parameters snapshot
-// .
+// OriginalParameters returns the raw route parameters snapshot taken at bind
+// time.
 func (r *Route) OriginalParameters(request *Request) map[string]string {
 	if request == nil {
 		return map[string]string{}
@@ -369,8 +398,7 @@ func (r *Route) ParametersWithoutNulls(request *Request) map[string]string {
 	return out
 }
 
-// SetParameter overrides a route parameter value at runtime
-// .
+// SetParameter overrides a route parameter value at runtime.
 func (r *Route) SetParameter(request *Request, name string, value string) *Route {
 	if request != nil {
 		request.SetRouteParam(name, value)
@@ -378,9 +406,8 @@ func (r *Route) SetParameter(request *Request, name string, value string) *Route
 	return r
 }
 
-// SetParameterValue stores an object value for a route parameter
-// . The object is kept on the
-// request and consumed by the dispatcher.
+// SetParameterValue stores an object value for a route parameter. The object is
+// kept on the request and consumed by the dispatcher.
 func (r *Route) SetParameterValue(request *Request, name string, value any) *Route {
 	if request != nil {
 		request.SetRouteParamObject(name, value)
@@ -396,8 +423,8 @@ func (r *Route) ForgetParameter(request *Request, name string) *Route {
 	return r
 }
 
-// ControllerDispatcher returns the dispatcher from the owning router
-// .
+// ControllerDispatcher returns the dispatcher of the owning router; it returns a
+// default dispatcher when the route has no router.
 func (r *Route) ControllerDispatcher() ControllerDispatcher {
 	if r.router != nil {
 		return r.router.getControllerDispatcher()
@@ -405,8 +432,8 @@ func (r *Route) ControllerDispatcher() ControllerDispatcher {
 	return &controllerDispatcher{}
 }
 
-// IsSerializedClosure reports whether the handler is a closure (always false
-// in Go; the reference implementation checks for SerializableClosure).
+// IsSerializedClosure reports whether the handler is a serialized closure. It
+// always returns false.
 func (r *Route) IsSerializedClosure() bool {
 	return false
 }

@@ -40,8 +40,7 @@ func NewMemoryRateLimiter() *MemoryRateLimiter {
 
 var _ RateLimiter = (*MemoryRateLimiter)(nil)
 
-// Limit defines the rate limiting policy for an attempt window
-// .
+// Limit defines the rate limiting policy for an attempt window.
 type Limit struct {
 	// Key is the rate limit signature key.
 	Key string
@@ -102,8 +101,7 @@ func (l *Limit) Response(callback ThrottleResponseCallback) *Limit {
 	return l
 }
 
-// FallbackKey returns a derived key used to disambiguate duplicate limit keys
-// .
+// FallbackKey returns a derived key used to disambiguate duplicate limit keys.
 func (l *Limit) FallbackKey() string {
 	prefix := ""
 	if l.Key != "" {
@@ -112,8 +110,7 @@ func (l *Limit) FallbackKey() string {
 	return prefix + "attempts:" + strconv.Itoa(l.MaxAttempts) + ":decay:" + strconv.Itoa(int(l.Decay/time.Second))
 }
 
-// Unlimited marks a rate limit that never throttles
-// .
+// Unlimited marks a rate limit that never throttles.
 type Unlimited struct {
 	*Limit
 }
@@ -154,9 +151,8 @@ func (r *RateLimiterRegistry) For(name string, callback func(request *Request) *
 }
 
 // ForCallback registers a named rate limiter whose callback may return any of
-// the supported results — *Limit, []*Limit (multiple buckets), *Unlimited (no
-// limiting) or *Response (sent as-is) — mirroring the single Closure the reference implementation
-// accepts from.
+// the supported results: *Limit, []*Limit (multiple buckets), *Unlimited (no
+// limiting) or *Response (sent as-is).
 func (r *RateLimiterRegistry) ForCallback(name string, callback func(request *Request) any) {
 	r.set(name, callback)
 }

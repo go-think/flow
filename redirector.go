@@ -13,8 +13,7 @@ import (
 const intendedURLKey = "url.intended"
 
 // UrlGenerationError reports that a named route URL could not be generated
-// because required parameters were missing
-// .
+// because required parameters were missing.
 type UrlGenerationError struct {
 	RouteName string
 	RouteURI  string
@@ -22,9 +21,8 @@ type UrlGenerationError struct {
 }
 
 // ForMissingParameters creates a UrlGenerationError for a named route with
-// missing parameters.
-// The missing entries carry their "{placeholder}" braces; the rendered
-// message strips them, matching the the reference implementation message format.
+// missing parameters. The missing entries carry their "{placeholder}" braces;
+// the rendered message strips them.
 func ForMissingParameters(routeName, routeURI string, missing []string) *UrlGenerationError {
 	return &UrlGenerationError{RouteName: routeName, RouteURI: routeURI, Missing: missing}
 }
@@ -45,15 +43,10 @@ func (e *UrlGenerationError) Error() string {
 	return message + "."
 }
 
-// Redirector builds redirect responses, mirroring the response-side helpers:
-// it resolves named routes and signed routes through the URL generator and
-// reads session state (previous URL, intended URL) through the request
-// provider.
-
-// the reference per-call headers argument is expressed through WithHeaders: it
-// returns a clone that stamps the given headers onto every redirect it
-// creates (Go variadic status lists cannot coexist with a variadic headers
-// argument in the same position).
+// Redirector builds redirect responses. It resolves named and signed routes
+// through the URL generator and reads session state (previous URL, intended
+// URL) through the request provider. Per-redirect headers are supplied through
+// WithHeaders, which returns a clone.
 type Redirector struct {
 	generator       *UrlGenerator
 	requestProvider func() *Request
@@ -87,10 +80,8 @@ func (r *Redirector) currentRequest() *Request {
 	return r.requestProvider()
 }
 
-// WithHeaders returns a CLONE of the redirector that stamps the given headers
-// onto every redirect it creates (Go equivalent of the reference per-call
-// headers argument on back/refresh/guest/intended/to/away/secure/route/
-// signedRoute/temporarySignedRoute/action). Existing headers are preserved.
+// WithHeaders returns a clone of the redirector that stamps the given headers
+// onto every redirect it creates. Existing headers are preserved.
 func (r *Redirector) WithHeaders(headers map[string]string) *Redirector {
 	clone := *r
 	merged := make(map[string]string, len(r.headers)+len(headers))
@@ -104,10 +95,9 @@ func (r *Redirector) WithHeaders(headers map[string]string) *Redirector {
 	return &clone
 }
 
-// createRedirect centralizes redirect response construction
-// : the status code and Location are set
-// through the shared Redirect factory, the redirector's headers are stamped
-// on, and the current request is attached when available.
+// createRedirect centralizes redirect response construction: the status code
+// and Location come from the shared Redirect factory, the redirector's headers
+// are stamped on, and the current request is attached when available.
 func (r *Redirector) createRedirect(path string, status int) *Response {
 	res := Redirect(path, status)
 	for k, v := range r.headers {
@@ -125,8 +115,7 @@ func (r *Redirector) To(path string, status ...int) *Response {
 	return r.createRedirect(r.gen().To(path), redirectStatus(status))
 }
 
-// Away redirects to an external URL without any normalization
-// .
+// Away redirects to an external URL without any normalization.
 func (r *Redirector) Away(url string, status ...int) *Response {
 	return r.createRedirect(url, redirectStatus(status))
 }
@@ -148,9 +137,8 @@ func (r *Redirector) Back(fallback string, status ...int) *Response {
 }
 
 // Route redirects to a named route. A missing route or missing parameters
-// panics with the generation error (the reference implementation throws
-// RouteNotFoundException/UrlGenerationException); use RouteWithError for the
-// error-returning variant.
+// panics with the generation error; use RouteWithError for the error-returning
+// variant.
 func (r *Redirector) Route(name string, params map[string]string, status ...int) *Response {
 	url, err := r.gen().Route(name, params)
 	if err != nil {
@@ -160,7 +148,7 @@ func (r *Redirector) Route(name string, params map[string]string, status ...int)
 }
 
 // RouteWithError redirects to a named route, returning the generation error
-// instead of panicking (Go error channel for the reference thrown exceptions).
+// instead of panicking.
 func (r *Redirector) RouteWithError(name string, params map[string]string, status ...int) (*Response, error) {
 	url, err := r.gen().Route(name, params)
 	if err != nil {
@@ -170,8 +158,8 @@ func (r *Redirector) RouteWithError(name string, params map[string]string, statu
 }
 
 // Action redirects to a route associated with a controller action. A missing
-// action panics with the error; use
-// ActionWithError for the error-returning variant.
+// action panics with the error; use ActionWithError for the error-returning
+// variant.
 func (r *Redirector) Action(action string, params map[string]string, status ...int) *Response {
 	url, err := r.gen().Action(action, params)
 	if err != nil {
@@ -181,8 +169,7 @@ func (r *Redirector) Action(action string, params map[string]string, status ...i
 }
 
 // ActionWithError redirects to a controller action, returning the generation
-// error instead of panicking (Go error channel for the reference thrown
-// exceptions).
+// error instead of panicking.
 func (r *Redirector) ActionWithError(action string, params map[string]string, status ...int) (*Response, error) {
 	url, err := r.gen().Action(action, params)
 	if err != nil {
@@ -219,8 +206,7 @@ func (r *Redirector) Secure(path string, status ...int) *Response {
 	return r.To(r.gen().Secure(path), status...)
 }
 
-// GetIntendedUrl reads the intended redirect URL from the session
-// .
+// GetIntendedUrl reads the intended redirect URL from the session.
 func (r *Redirector) GetIntendedUrl() string {
 	req := r.currentRequest()
 	if req == nil {
@@ -270,9 +256,8 @@ func (r *Redirector) PreviousPath(fallback string, status ...int) *Response {
 }
 
 // Intended redirects to the URL the user was heading to before being
-// intercepted, or to the given default which is passed through as-is
-// (the reference implementation: the default path is handed to the session pull and
-// to() verbatim, no "/" is forced); the stored URL is consumed on read.
+// intercepted, or to the given default, which is passed through as-is (no "/"
+// is forced). The stored URL is consumed on read.
 func (r *Redirector) Intended(defaultPath string, status ...int) *Response {
 	target := defaultPath
 	if req := r.currentRequest(); req != nil {
@@ -296,8 +281,7 @@ func (r *Redirector) pullIntendedUrl(s session.Session, fallback string) string 
 	return fallback
 }
 
-// SetIntendedUrl records the URL to redirect to after interception
-// .
+// SetIntendedUrl records the URL to redirect to after interception.
 func (r *Redirector) SetIntendedUrl(url string) {
 	req := r.currentRequest()
 	if req == nil {

@@ -86,7 +86,7 @@ func TestSingletonResource(t *testing.T) {
 	assert.True(t, r.Has("profile.show"))
 	assert.True(t, r.Has("profile.edit"))
 	assert.True(t, r.Has("profile.update"))
-	// the reference implementation singletons only expose destroy when creatable/destroyable.
+	// Singletons only expose destroy when creatable/destroyable.
 	assert.False(t, r.Has("profile.destroy"))
 	assert.False(t, r.Has("profile.store"))
 	assert.Equal(t, "/profile", r.Url("profile.show", nil))
@@ -115,7 +115,7 @@ func TestResourceNamesOverride(t *testing.T) {
 func TestResourceMiddleware(t *testing.T) {
 	r := New(nil, nil)
 	seen := ""
-	r.RegisterController("PhotoController", &testUserController{})
+	r.RegisterController("PhotoController", newTestUserController())
 	r.Resource("photos", "PhotoController").Middleware(func(req *Request, next Closure) any {
 		seen = "resource-mw"
 		return next(req)
@@ -138,10 +138,9 @@ func routeByName(r Router, name string) *Route {
 	return nil
 }
 
-// TestResourceWithTrashedOptIn verifies that withTrashed only applies when
-// WithTrashed was called), targets the
-// member actions by default, honours an explicit list, and never applies to
-// singletons.
+// TestResourceWithTrashedOptIn verifies that WithTrashed only applies when
+// WithTrashed was called, targets the member actions by default, honours an
+// explicit list, and never applies to singletons.
 func TestResourceWithTrashedOptIn(t *testing.T) {
 	// Without WithTrashed nothing is trashed.
 	r := New(nil, nil)
@@ -181,8 +180,8 @@ func TestResourceWithTrashedOptIn(t *testing.T) {
 }
 
 // TestResourceMissingNotOnCollectionActions verifies the missing callback is
-// not carried by the collection actions
-// in addResourceIndex/Create/Store and addSingletonCreate/Store/Show).
+// not carried by the collection actions (index/create/store for resources and
+// create/store/show for singletons).
 func TestResourceMissingNotOnCollectionActions(t *testing.T) {
 	missing := func(req *Request, err error) any { return nil }
 	r := New(nil, nil)
@@ -207,12 +206,10 @@ func TestResourceMissingNotOnCollectionActions(t *testing.T) {
 	}
 }
 
-// TestResourceMiddlewareForOrderAndDedup verifies the the reference implementation semantics of
-// middlewareFor: the base list is merged in front of the action-specific one
-// and deduplicated keeping the first occurrence; a later Middleware() call
-// re-merges the per-action lists with the new base behind them
-// (the reference implementation: /middlewareFor +
-// ).
+// TestResourceMiddlewareForOrderAndDedup verifies middlewareFor: the base list
+// is merged in front of the action-specific one and deduplicated keeping the
+// first occurrence; a later Middleware() call re-merges the per-action lists
+// with the new base behind them.
 func TestResourceMiddlewareForOrderAndDedup(t *testing.T) {
 	r := New(nil, nil)
 	r.Resource("photos", "PhotoController").Middleware("m1", "m2").
@@ -234,9 +231,8 @@ func TestResourceMiddlewareForOrderAndDedup(t *testing.T) {
 	assert.Equal(t, []any{"b"}, routeByName(r2, "photos.index").GetMiddleware())
 }
 
-// TestResourceExcludedMiddlewareForDedup verifies the excluded list is
-// merged with the base and deduplicated
-// )).
+// TestResourceExcludedMiddlewareForDedup verifies the excluded list is merged
+// with the base and deduplicated.
 func TestResourceExcludedMiddlewareForDedup(t *testing.T) {
 	r := New(nil, nil)
 	r.Resource("photos", "PhotoController").WithoutMiddleware("x").
@@ -298,8 +294,7 @@ func TestResourceBaseNameAndAsPrefix(t *testing.T) {
 }
 
 // TestPendingResourceWhereConstraints verifies the regular expression
-// convenience methods (the reference implementation: CreatesRegularExpressionRouteConstraints on
-// the pending resource registrations).
+// convenience methods on the pending resource registrations.
 func TestPendingResourceWhereConstraints(t *testing.T) {
 	r := New(nil, nil)
 	r.Resource("photos", "PhotoController").WhereNumber("photo")
@@ -333,8 +328,8 @@ func TestPendingResourceWhereConstraints(t *testing.T) {
 	assert.Equal(t, "one|two", routeByName(r6, "photos.show").Wheres()["photo"])
 }
 
-// TestGetResourceParametersAndVerbs verifies the global getters
-// .
+// TestGetResourceParametersAndVerbs verifies the global resource parameter and
+// verb getters and setters.
 func TestGetResourceParametersAndVerbs(t *testing.T) {
 	r := New(nil, nil)
 	assert.Empty(t, r.GetResourceParameters())
@@ -364,10 +359,9 @@ func routeRegistered(r Router, key, action string) bool {
 }
 
 // TestResourceScopedFieldsFilteredByURI verifies that scoped binding fields
-// are applied only for the parameters that actually occur in a route's URI
-// (the reference implementation: setResourceBindingFields —
-// preg_match_all over the URI placeholders): collection routes (index/store/
-// create) carry no id placeholder and receive no binding field for it.
+// are applied only for the parameters that actually occur in a route's URI:
+// collection routes (index/store/create) carry no id placeholder and receive
+// no binding field for it.
 func TestResourceScopedFieldsFilteredByURI(t *testing.T) {
 	r := NewRouter(nil, nil)
 	r.Resource("users.posts", "PostController").
@@ -383,8 +377,7 @@ func TestResourceScopedFieldsFilteredByURI(t *testing.T) {
 	assert.Equal(t, "slug", show.BindingFieldFor("post"))
 
 	// Collection routes carry no {post} placeholder: the post field is not
-	// applied there (the reference implementation array_fill_keys/array_intersect_key on the URI
-	// matches), while the {user} field still is.
+	// applied there, while the {user} field still is.
 	index := routeByName(r, "users.posts.index")
 	require.NotNil(t, index)
 	assert.Contains(t, index.GetUri(), "{user}")
@@ -402,10 +395,9 @@ func TestResourceScopedFieldsFilteredByURI(t *testing.T) {
 	assert.Equal(t, "uuid", create.BindingFieldFor("user"))
 }
 
-// TestResourceActionNamesAreCaseSensitive verifies the the reference implementation-mirrored
-// case handling of only/except: user-provided action names are normalized
-// once ("index" → "Index") and then compared exactly
-// , so arbitrary casing does not match.
+// TestResourceActionNamesAreCaseSensitive verifies the case handling of
+// only/except: user-provided action names are normalized once ("index" →
+// "Index") and then compared exactly, so arbitrary casing does not match.
 func TestResourceActionNamesAreCaseSensitive(t *testing.T) {
 	// The conventional lower-case spellings normalize onto the canonical
 	// capitalized verb names.

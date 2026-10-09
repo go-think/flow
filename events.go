@@ -31,7 +31,6 @@ type ResponsePreparedEvent struct {
 
 // EventDispatcher is the narrow interface the Router needs for broadcasting
 // routing lifecycle events.
-// Think 的 EventDispatcher 已满足此接口。
 type EventDispatcher interface {
 	Dispatch(eventName string, payload any)
 	Listen(eventName string, listener any)
@@ -39,18 +38,15 @@ type EventDispatcher interface {
 	Forget(eventName string)
 }
 
-// InvalidSignatureError is raised when signature validation fails
-// (the reference implementation: Routing\Exceptions\InvalidSignatureException — an HttpException
-// 403 with the message "Invalid signature.").
+// InvalidSignatureError is returned when signature validation fails; it renders
+// as a 403 with the message "Invalid signature.".
 type InvalidSignatureError struct{}
 
 func (e *InvalidSignatureError) Error() string {
 	return "Invalid signature."
 }
 
-// Render converts the error into the 403 "Invalid signature." response
-// (the reference implementation: InvalidSignatureException extends HttpException(403,
-// 'Invalid signature.') and is rendered by the exception handler).
+// Render converts the error into the 403 "Invalid signature." response.
 func (e *InvalidSignatureError) Render() *Response {
 	return NewResponse().SetCode(http.StatusForbidden).SetContent("Invalid signature.")
 }
@@ -68,8 +64,7 @@ func (e *StreamedResponseError) Unwrap() error {
 	return e.Inner
 }
 
-// Render converts the streamed error into a 500 response
-// .
+// Render converts the streamed error into a 500 response.
 func (e *StreamedResponseError) Render() *Response {
 	return NewResponse().SetCode(500).SetContent("Streamed response failed")
 }
@@ -79,9 +74,8 @@ func (e *StreamedResponseError) GetInnerException() error {
 	return e.Inner
 }
 
-// MissingRateLimiterError is raised when a named rate limiter is not
-// registered (the reference implementation: Routing\Exceptions\MissingRateLimiterException —
-// "Rate limiter [name] is not defined.").
+// MissingRateLimiterError is returned when a named rate limiter is not
+// registered ("Rate limiter [name] is not defined.").
 type MissingRateLimiterError struct {
 	Limiter string
 }
@@ -90,29 +84,24 @@ func (e *MissingRateLimiterError) Error() string {
 	return fmt.Sprintf("Rate limiter [%s] is not defined.", e.Limiter)
 }
 
-// ForLimiter creates a MissingRateLimiterError for a named limiter
-// .
+// ForMissingRateLimiter creates a MissingRateLimiterError for a named limiter.
 func ForMissingRateLimiter(limiter string) *MissingRateLimiterError {
 	return &MissingRateLimiterError{Limiter: limiter}
 }
 
-// ForLimiterAndUser creates a MissingRateLimiterError for a limiter and model
-// (the reference implementation: — the message reads
-// "Rate limiter [model::name] is not defined.").
+// ForMissingRateLimiterAndUser creates a MissingRateLimiterError whose limiter
+// name is the "model::name" pair.
 func ForMissingRateLimiterAndUser(limiter string, model string) *MissingRateLimiterError {
 	return &MissingRateLimiterError{Limiter: model + "::" + limiter}
 }
 
-// ThrottleRequestsException is raised when a rate limit is exceeded
-// (the reference implementation: Http\Exceptions\ThrottleRequestsException extends
-// TooManyRequestsHttpException, carrying the Retry-After and X-RateLimit-*
-// headers). The throttle middleware renders it with Render into the 429
-// response.
+// ThrottleRequestsException is returned when a rate limit is exceeded. It
+// carries the Retry-After and X-RateLimit-* headers, and the throttle middleware
+// renders it with Render into the 429 response.
 type ThrottleRequestsException struct {
 	// Message is the exception message ("Too Many Attempts.").
 	Message string
-	// RetryAfter is the seconds until the next retry (the reference implementation: the
-	// TooManyRequestsHttpException retry-after constructor argument).
+	// RetryAfter is the seconds until the next retry.
 	RetryAfter int
 	// Headers are the rate-limit headers attached to the rendered response.
 	Headers map[string]string
@@ -123,8 +112,7 @@ func (e *ThrottleRequestsException) Error() string {
 }
 
 // Render converts the exception into the 429 response with its rate-limit
-// headers (the reference implementation: the exception handler renders the HttpException with its
-// status and headers).
+// headers.
 func (e *ThrottleRequestsException) Render() *Response {
 	res := NewResponse().SetCode(http.StatusTooManyRequests).SetContent(e.Message)
 	for name, value := range e.Headers {

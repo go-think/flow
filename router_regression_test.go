@@ -66,7 +66,7 @@ func TestScopeBindingsLastCallWins(t *testing.T) {
 	assert.True(t, route.PreventsScopedBindings())
 }
 
-// replaces ALL occurrences of a binding-field placeholder
+// ParseRouteUri replaces ALL occurrences of a binding-field placeholder
 // (string-replacement semantics).
 func TestParseRouteUriReplacesAllOccurrences(t *testing.T) {
 	parsed := ParseRouteUri("/x/{user:id}/y/{user:id}")
@@ -74,8 +74,7 @@ func TestParseRouteUriReplacesAllOccurrences(t *testing.T) {
 	assert.Equal(t, "id", parsed.BindingFields["user"])
 }
 
-// Route verbs are normalized to upper case (the reference implementation compares upper-case
-// request methods with upper-case route methods).
+// Route verbs are normalized to upper case for matching.
 func TestAddNormalizesVerbCase(t *testing.T) {
 	r := NewRouter(nil, nil)
 	r.Add([]string{"get", "Post"}, "/mixed", func() string { return "ok" })
@@ -144,8 +143,8 @@ func TestNotFoundMessagePathSemantics(t *testing.T) {
 	assert.Equal(t, 404, res.GetCode())
 	assert.Equal(t, "The route missing could not be found.", res.GetContent())
 
-	// PUT / hits 405 (the GET / route exists — the reference implementation behavior); the message
-	// reports the trimmed root path "/".
+	// PUT / hits 405 (the GET / route exists); the message reports the trimmed
+	// root path "/".
 	reqRoot := NewRequest(httptest.NewRequest("PUT", "/", nil))
 	resRoot := r.Dispatch(reqRoot)
 	assert.Equal(t, 405, resRoot.GetCode())

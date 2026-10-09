@@ -172,9 +172,7 @@ func TestCompat_DynamicSubdomainRoute(t *testing.T) {
 
 // TestCompat_DynamicSubdomainRouteParameterOrder verifies that positional
 // handler arguments on a dynamic-domain route receive host parameters first,
-// then path parameters — matching the reference binder's merge order
-// (RouteParameterBinder::bindHostParameters merges host matches ahead of the
-// path parameters) that Bind and ParameterNames both declare.
+// then path parameters, as Bind and ParameterNames both declare.
 func TestCompat_DynamicSubdomainRouteParameterOrder(t *testing.T) {
 	r := NewRouter(nil, nil)
 
@@ -228,9 +226,9 @@ func TestCompat_ModelBindingMissingAndScoped(t *testing.T) {
 	assert.Equal(t, http.StatusAccepted, respMissing.StatusCode())
 	assert.Equal(t, "custom-missing-handled", respMissing.Body())
 
-	// 3. Scoped binding (parent -> child). Like the reference implementation, scoping only applies
-	// when the route enforces it (scopeBindings / bindingFields); otherwise
-	// the child resolves its own binding.
+	// 3. Scoped binding (parent -> child): scoping only applies when the route
+	// enforces it (ScopeBindings); otherwise the child resolves its own
+	// binding.
 	r.Get("/posts/{post}/comments/{comment}", func(ctx Context, post *mockPost, comment *mockComment) Response {
 		return ctx.String(http.StatusOK, "post:"+post.ID+",comment:"+comment.ID)
 	})
@@ -488,9 +486,8 @@ func TestCompat_ResourceScopedFieldsAndMetadata(t *testing.T) {
 	for _, rt := range routes {
 		if rt.GetName() == "users.posts.show" {
 			foundShow = true
-			// scoped() only records binding fields; the route-level
-			// scopeBindings flag stays unset (the reference implementation:
-			// + setResourceBindingFields).
+			// Scoped() only records binding fields; the route-level
+			// ScopeBindings flag stays unset.
 			assert.False(t, rt.EnforcesScopedBindings())
 			assert.Equal(t, "slug", rt.BindingFieldFor("post"))
 			assert.Equal(t, "admin", rt.Metadata("scope"))
@@ -550,9 +547,7 @@ func TestCompat_PrefixedResource(t *testing.T) {
 	assert.True(t, foundIndex)
 }
 
-// TestCompat_QueryVerbRoute verifies the QUERY verb registration and dispatch
-// (the reference Router::$verbs includes QUERY and Router::query registers a
-// route against it).
+// TestCompat_QueryVerbRoute verifies the QUERY verb registration and dispatch.
 func TestCompat_QueryVerbRoute(t *testing.T) {
 	r := NewRouter(nil, nil)
 	r.Query("/search", func(ctx Context) string {
@@ -564,8 +559,7 @@ func TestCompat_QueryVerbRoute(t *testing.T) {
 	assert.Equal(t, "query result", resp.Body())
 }
 
-// TestCompat_AnyIncludesQueryVerb verifies Any() registers the QUERY verb as
-// well (the reference any() registers against every Router::$verbs entry).
+// TestCompat_AnyIncludesQueryVerb verifies Any() also registers the QUERY verb.
 func TestCompat_AnyIncludesQueryVerb(t *testing.T) {
 	r := NewRouter(nil, nil)
 	r.Any("/catch-all", func(ctx Context) string {

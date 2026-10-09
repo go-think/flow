@@ -416,7 +416,7 @@ func TestSessionMiddleware_ProcessFlow(t *testing.T) {
 }
 
 func TestSessionMiddleware_CustomConfigAndManager(t *testing.T) {
-	// 1. 传入 nil 使用默认配置
+	// 1. Passing nil uses the default config.
 	mwDef := NewSessionMiddleware(nil)
 	smDef, ok := mwDef.(*SessionMiddleware)
 	assert.True(t, ok)
@@ -424,7 +424,7 @@ func TestSessionMiddleware_CustomConfigAndManager(t *testing.T) {
 	assert.Equal(t, "think_session", smDef.Manager.Config.CookieName)
 	assert.Equal(t, 120*time.Minute, smDef.Manager.Config.Lifetime)
 
-	// 2. 传入自定义 *Config（部分覆盖，其余使用默认值）
+	// 2. A custom *Config partially overrides; the rest keeps defaults.
 	customCfg := &Config{
 		Driver:     "cookie",
 		CookieName: "my_app_session",
@@ -434,9 +434,9 @@ func TestSessionMiddleware_CustomConfigAndManager(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "cookie", smCustom.Manager.Config.Driver)
 	assert.Equal(t, "my_app_session", smCustom.Manager.Config.CookieName)
-	assert.Equal(t, 120*time.Minute, smCustom.Manager.Config.Lifetime) // 继承默认生命周期
+	assert.Equal(t, 120*time.Minute, smCustom.Manager.Config.Lifetime) // inherits the default lifetime
 
-	// 3. 直接通过 struct 注入 Manager
+	// 3. A Manager injected directly via struct.
 	customMgr := NewManager(&Config{
 		Driver:     "file",
 		CookieName: "external_mgr_session",
@@ -459,7 +459,7 @@ func TestCookieMiddleware(t *testing.T) {
 		return NewResponse().SetContent("ok")
 	})
 
-	// 2. 自定义配置（Prefix 与 Domain）
+	// 2. Custom config (Prefix and Domain).
 	customCfg := &CookieConfig{
 		Prefix:   "myapp_",
 		Domain:   "example.com",
@@ -474,12 +474,12 @@ func TestCookieMiddleware(t *testing.T) {
 	req2 := NewRequest(httpReq2)
 
 	res := customMw.Process(req2, func(r *Request) any {
-		// 读取 cookie，自动应用 Prefix "myapp_"
+		// Reading the cookie applies the "myapp_" prefix automatically.
 		val, err := r.Cookie("token")
 		assert.Nil(t, err)
 		assert.Equal(t, "secret_token", val)
 
-		// 响应端设置 cookie，自动继承 Domain/Secure/Path
+		// Setting a response cookie inherits Domain/Secure/Path.
 		resp := NewResponse()
 		_ = resp.Cookie("user_id", "123")
 		return resp
@@ -516,9 +516,8 @@ func TestSubstituteBindingsMiddlewareMissingCallback(t *testing.T) {
 
 	mw := NewSubstituteBindingsMiddleware(r)
 
-	// the reference implementation L41-50: the ModelNotFoundException is
-	// caught, the route's missing callback runs and its result is returned —
-	// the next handler is never called.
+	// The ModelNotFoundError is caught, the route's missing callback runs and
+	// its result is returned — the next handler is never called.
 	reqBad := NewRequest(mustNewRequest("GET", "/users/2"))
 	reqBad.SetRouteParam("user", "2")
 
@@ -556,8 +555,8 @@ func TestSubstituteBindingsMiddlewareMissingCallback(t *testing.T) {
 // --- MiddlewareNameResolver lookup order ---
 
 func TestMiddlewareNameResolver_ClosureAliasFullStringWinsOverGroup(t *testing.T) {
-	// the reference implementation L24-26: the FULL name is checked against the map before the
-	// group lookup, and the hit is honored when the mapped value is a Closure.
+	// The FULL name is checked against the alias map before the group lookup,
+	// and the hit is honored when the mapped value is a Closure.
 	closure := HandlerFunc(func(req *Request, next Closure) any { return next(req) })
 	r := NewMiddlewareNameResolver(
 		map[string]any{"web": closure},
@@ -587,10 +586,9 @@ func TestMiddlewareNameResolver_ClosureAliasFullStringWinsOverGroup(t *testing.T
 }
 
 func TestMiddlewareNameResolver_GroupBeforeAliasSplit(t *testing.T) {
-	// the reference implementation L29-32: after the closure check, an exact group name expands —
-	// even when an alias of the same head exists (a group named like an alias
-	// cannot coexist for the plain name, but the group check must precede the
-	// parameterized alias split).
+	// After the closure check an exact group name expands — even when an alias
+	// of the same head exists; the group check must precede the parameterized
+	// alias split.
 	alias := "App\\Auth"
 	r := NewMiddlewareNameResolver(
 		map[string]any{"auth": alias},
@@ -603,8 +601,8 @@ func TestMiddlewareNameResolver_GroupBeforeAliasSplit(t *testing.T) {
 }
 
 func TestMiddlewareNameResolver_ParameterizedGroupNameDoesNotExpand(t *testing.T) {
-	// the reference implementation checks group membership with the FULL entry string
-	// (a full-string group lookup), so "web:foo" never expands group "web".
+	// Group membership is checked with the FULL entry string, so "web:foo"
+	// never expands group "web".
 	r := NewMiddlewareNameResolver(
 		map[string]any{},
 		map[string][]any{"web": {"auth"}},
@@ -616,9 +614,9 @@ func TestMiddlewareNameResolver_ParameterizedGroupNameDoesNotExpand(t *testing.T
 }
 
 func TestMiddlewareNameResolver_StringAliasWithParamsStillResolves(t *testing.T) {
-	// the reference implementation L35-36: a string alias is resolved through the split, with the
-	// parameters re-appended; a full-string string alias entry is NOT honored
-	// at the top level (only Closures are).
+	// A string alias is resolved through the split with the parameters
+	// re-appended; a full-string string alias entry is NOT honored at the top
+	// level (only Closures are).
 	r := NewMiddlewareNameResolver(
 		map[string]any{"throttle:10": "App\\FullString", "throttle": "App\\Throttle"},
 		map[string][]any{},
